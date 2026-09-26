@@ -1,242 +1,490 @@
 # Betrayer Framework
 
-**Betrayer** is a Python web application framework designed with an **LLM-first architecture**.
+**Betrayer** is a **general-purpose Python application framework designed with an LLM-first architecture**.
 
-The primary goal is not to reproduce every feature of existing frameworks, but to make application development **easy for LLM coding agents** while remaining practical and understandable for human developers.
+Betrayer is not limited to web applications. It provides a common application foundation that can be used to build different kinds of software — from CLI tools and APIs to web applications, workers, automation systems, AI applications, and other application types.
 
-> **Build the framework so an LLM can use it without having to understand its internal implementation.**
+> **Build applications with less code, less reasoning, fewer tool calls, fewer tokens, and less ambiguity.**
 
 ## Status
 
-🚧 **Active Development — Not Production Ready**
+**Active Development — Not Production Ready**
 
-Betrayer is still being developed and its APIs, architecture, generators, and conventions may change.
+Betrayer is currently under active development. Core architecture and capabilities are still evolving.
 
-The framework is currently focused on establishing its core architecture and an LLM-friendly development workflow.
+The current implementation focuses on establishing the foundation and proving the framework through real application workflows, especially application structure, CLI, database, migration, resource/API, and code generation.
 
-## What Betrayer Is
+---
 
-Betrayer is a modular Python web framework providing building blocks for application development, including:
+## What is Betrayer?
 
-* Application and bootstrap lifecycle
-* Configuration and environment management
-* Module system
-* Service layer
-* Database and data layer
-* Migration system
-* HTTP resources and APIs
-* CRUD resources
-* CLI and code generators
-* Infrastructure services
-* Validation and diagnostics
-* Testing support
-* Realtime / WebSocket support
-* Background jobs and scheduling
-* LLM-oriented framework metadata and capabilities
+Betrayer is an **application framework**, not a framework tied to one type of application.
 
-The framework is designed around clear boundaries between these components so that they can evolve independently.
+A project built with Betrayer can choose the capabilities it needs.
 
-## LLM-First
-
-The most important design principle of Betrayer is **LLM-first development**.
-
-An LLM should not need to inspect the framework's source code every time it wants to use a feature.
-
-For example, an agent should be able to understand:
+For example:
 
 ```text
-Create a CRUD resource
+Bersuara
+├── CLI
+├── API
+├── Web UI
+├── Worker
+├── Scheduler
+├── AI / ML
+└── Storage
 ```
 
-from a concise capability/contract description and then use it directly.
-
-It should **not** need to:
+Another project may only need:
 
 ```text
-find class
-→ open source file
-→ inspect implementation
-→ trace dependencies
-→ understand internal architecture
-→ figure out how to call it
+MyTool
+└── CLI
 ```
 
-Instead:
+Or:
 
 ```text
-discover capability
-→ understand contract
-→ call capability
-→ receive structured result
+MyService
+├── API
+└── Worker
 ```
 
-This makes the framework easier for both autonomous coding agents and human developers.
+The framework does not require every application to use HTTP, a database, or a web interface.
+
+Web and database capabilities are simply some of the capabilities currently being developed.
+
+---
+
+## Why LLM-First?
+
+Betrayer is designed primarily to make application development easier for **LLMs and coding agents**.
+
+Traditional frameworks are often designed around human developers navigating documentation, source code, abstractions, and configuration.
+
+Betrayer takes a different approach.
+
+The framework should expose clear, predictable capabilities so an LLM can do this:
+
+```text
+Requirement
+    ↓
+Discover capability
+    ↓
+Understand contract
+    ↓
+Use capability
+    ↓
+Get structured result
+```
+
+Instead of:
+
+```text
+Requirement
+    ↓
+List files
+    ↓
+Read framework source
+    ↓
+Trace classes
+    ↓
+Understand dependencies
+    ↓
+Figure out conventions
+    ↓
+Implement manually
+```
+
+The goal is to hide framework complexity **inside the framework**, rather than forcing the LLM to understand that complexity.
+
+### LLM Surface ≠ Internal Surface
+
+Betrayer may internally contain complex systems and abstractions.
+
+That is acceptable.
+
+The important part is that this complexity should not become unnecessary cognitive work for the LLM.
+
+The LLM should primarily need to understand:
+
+* What capability exists
+* What input it accepts
+* How to invoke it
+* What it produces
+* What can fail
+* What to do next
+
+It should not normally need to understand how the framework internally implements the capability.
+
+---
 
 ## Design Principles
 
-Betrayer is being developed around several principles:
+Betrayer is guided by eight primary goals:
 
-1. **LLM First**
-   Framework capabilities should be directly consumable by coding agents.
+1. **Less file reading**
+   Minimize the amount of framework and project source the LLM needs to inspect.
 
-2. **Convention Over Investigation**
-   Common tasks should have one obvious way to accomplish them.
+2. **Less reasoning**
+   Provide predictable architecture and canonical ways of doing things.
 
-3. **Minimal Context**
-   An agent should not need to read large portions of the framework to perform normal tasks.
+3. **Fewer tool calls**
+   Prefer operations that accomplish complete tasks instead of many small operations.
 
-4. **Structured Interfaces**
-   Commands, capabilities, errors, and results should be machine-readable whenever practical.
+4. **Fewer tokens**
+   Reduce unnecessary context, boilerplate, and output.
 
-5. **Modular Architecture**
-   Components should remain replaceable and independently maintainable.
+5. **Less ambiguity**
+   Prefer one obvious convention over multiple equivalent approaches.
 
-6. **Batteries Included Where Useful**
-   Common application infrastructure should be provided instead of forcing agents to recreate it.
+6. **Faster API discovery**
+   Make capabilities easy for an LLM to discover and understand.
 
-7. **Framework, Not Agent**
-   Betrayer provides capabilities and contracts. The LLM remains responsible for reasoning and deciding what to do.
+7. **Faster code generation**
+   Provide generators, conventions, and reusable application structures.
 
-8. **Human Compatible**
-   Although optimized for LLM agents, applications built with Betrayer should remain understandable and maintainable by humans.
+8. **Faster error recovery**
+   Provide structured, actionable errors and diagnostics so an LLM can identify and fix problems quickly.
 
-## Current Architecture
+The core question for every feature is:
 
-The framework is being built around a layered application model:
+> **Does this make an LLM build an application faster with less reading, reasoning, tool calls, tokens, and ambiguity?**
+
+If not, the feature or abstraction should be reconsidered or simplified.
+
+---
+
+## Application Foundation
+
+Betrayer provides a common foundation for applications.
+
+The architecture is intended to grow around capabilities rather than forcing one application type.
 
 ```text
-Application
-    │
-    ├── Core / Bootstrap
-    │
-    ├── Module
-    │
-    ├── Web / Resource
-    │
-    ├── Service
-    │
-    ├── Repository / Data
-    │
-    └── Database
+                         BETRAYER
+                            │
+                  Application Foundation
+                            │
+          ┌─────────────────┼─────────────────┐
+          │                 │                 │
+         Core              CLI            Generators
+          │                 │                 │
+          ├── Config        │                 │
+          ├── Module        │          Project Generator
+          ├── Service       │          Module Generator
+          ├── Container     │          Resource Generator
+          ├── Application   │          CRUD Generator
+          └── ...           │          Migration Generator
+                            │
+             ┌──────────────┼──────────────┐
+             │              │              │
+            Web          Database        Future
+             │              │              │
+            API            ORM          Worker
+            HTTP         Migration      Queue
+            Resource     Repository      Scheduler
+            Routing      Transaction     Events
+             │              │              │
+             └──────────────┴──────────────┘
 ```
 
-Additional infrastructure such as jobs, queues, scheduling, events, caching, validation, diagnostics, and realtime communication is being developed around these core layers.
+These capabilities are composable.
+
+An application can use only the parts it needs.
+
+---
+
+## Example: Bersuara
+
+For example, suppose we want to build an AI music application called **Bersuara**.
+
+Betrayer can provide the application foundation:
+
+```text
+Bersuara
+│
+├── CLI
+│
+├── API
+│
+├── Web UI
+│
+├── Worker
+│
+├── Storage
+│
+└── Database
+```
+
+The domain-specific logic remains inside Bersuara:
+
+```text
+Prompt
+   ↓
+Music Generation Service
+   ↓
+AI Model / Inference Engine
+   ↓
+Audio Processing
+   ↓
+Storage
+   ↓
+Result
+```
+
+Betrayer does not need to know how the music generation model works.
+
+It provides the application infrastructure around it.
+
+The same principle can be used for completely different applications.
+
+---
+
+## Current Capabilities
+
+The current development roadmap includes:
+
+* Application and bootstrap foundation
+* Configuration
+* Dependency/container foundation
+* Module system
+* Service layer
+* CLI
+* Project generators
+* Resource generators
+* CRUD generators
+* Migration generators
+* Extension generators
+* Database abstraction
+* ORM / query builder
+* Repository
+* HTTP/API resources
+* Validation
+* Testing
+* Diagnostics
+* Jobs and workers
+* Queue
+* Scheduler
+* WebSocket / realtime
+* Authentication and authorization
+* Cache and pagination
+* LLM capability contracts
+* Framework discoverability
+* Architecture validation
+* Application integration
+
+Not every application will need every capability.
+
+---
+
+## LLM Capability Contracts
+
+One of the important parts of Betrayer is making framework capabilities discoverable by machines.
+
+Instead of requiring an LLM to inspect framework source code, capabilities can expose contracts describing:
+
+```text
+Capability
+Purpose
+Input
+Usage
+Output
+Errors
+Next Steps
+Dependencies
+Side Effects
+Examples
+```
+
+For example:
+
+```json
+{
+  "capability": "crud.create",
+  "purpose": "Create a complete CRUD resource",
+  "input": {
+    "name": "string"
+  },
+  "usage": "bet make crud <name>",
+  "output": [
+    "model",
+    "repository",
+    "service",
+    "routes",
+    "module"
+  ]
+}
+```
+
+This allows coding agents to interact with Betrayer through a stable capability surface instead of depending on internal framework implementation details.
+
+---
 
 ## CLI
 
-Betrayer provides a CLI for creating and managing application components.
+The CLI is one of the primary interfaces for interacting with Betrayer.
 
 Examples:
 
 ```bash
-bet create myapp
-
+bet create project
 bet make module users
-
-bet make service user
-
-bet make resource user
-
+bet make resource product
+bet make service payment
 bet make crud product
+bet make migration create_products_table
 ```
 
-The CLI and generators are intended to produce useful application code rather than merely empty boilerplate.
-
-## Development Philosophy
-
-Betrayer is **not trying to win by having the most features**.
-
-The main question behind every feature is:
-
-> **Does this make an LLM agent faster, more reliable, and less dependent on inspecting framework internals?**
-
-A feature that adds complexity without improving the development workflow is not automatically valuable.
-
-The long-term goal is a framework where an agent can build an application through a small number of predictable operations:
-
-```text
-Understand the application requirement
-        ↓
-Discover available capabilities
-        ↓
-Use the framework contracts
-        ↓
-Generate / modify application code
-        ↓
-Run and validate
-        ↓
-Diagnose and fix
-```
-
-without repeatedly reverse-engineering the framework itself.
-
-## Relationship With Coding Agents
-
-Betrayer is framework-agnostic from the perspective of the coding agent.
-
-A coding agent such as AETHER should be able to use Betrayer through its documented capabilities and contracts without requiring special knowledge of Betrayer's internal source code.
-
-The goal is:
-
-```text
-Agent
-  │
-  │ generic capability / contract
-  ▼
-Betrayer
-  │
-  ▼
-Application
-```
-
-rather than coupling the agent directly to Betrayer's internal classes.
-
-## Development Roadmap
-
-The project is being developed incrementally.
-
-Current major areas include:
-
-* Core Foundation
-* Configuration
-* Database
-* Migration
-* Module System
-* Service Layer
-* CLI & Generators
-* Resource / API
-* Database E2E & ORM
-* Golden Path Integration
-* Validation & Request Pipeline
-* Testing System
-* Diagnostics & Developer Tools
-* Events / Jobs / Queue / Scheduler
-* WebSocket / Realtime
-* Application Essentials
-* LLM Intelligence
-* Architecture Guard
-* Framework Discoverability
-* Final Integration & LLM Benchmark
-
-The roadmap is intentionally focused on **LLM usability and development efficiency**, rather than simply matching the feature list of existing frameworks.
-
-## Project Status
-
-Betrayer is currently **under active development**.
-
-Some parts of the framework are already implemented and tested, while other major subsystems are still being built.
-
-Therefore:
-
-* APIs may change.
-* Architecture may evolve.
-* Some features are incomplete.
-* Production use is not recommended yet.
-
-The repository represents an evolving framework rather than a finished stable release.
+Generators are important because they allow an LLM to create complete framework structures with a small number of commands rather than manually creating and configuring many files.
 
 ---
 
-**Betrayer Framework**
+## Current Architecture Direction
 
-*A Python web framework designed to be easy for LLMs to use.*
+The framework is intentionally modular.
+
+A simplified application can look like:
+
+```text
+Application
+    │
+    ├── Module
+    │
+    ├── Service
+    │
+    ├── Resource / Interface
+    │
+    ├── Repository
+    │
+    └── Infrastructure
+```
+
+For database-backed applications:
+
+```text
+Model
+  ↓
+Query
+  ↓
+Repository
+  ↓
+Database
+```
+
+For web/API applications:
+
+```text
+Request
+  ↓
+Resource
+  ↓
+Service
+  ↓
+Repository
+  ↓
+Database
+```
+
+These are capabilities provided by Betrayer, not requirements imposed on every application.
+
+---
+
+## Roadmap
+
+The current roadmap is organized into the following major stages:
+
+|  # | Stage                             | Status |
+| -: | --------------------------------- | :----: |
+| 01 | Core Foundation                   |    ✅   |
+| 02 | Configuration                     |    ✅   |
+| 03 | Database Foundation               |    ✅   |
+| 04 | Migration                         |    ✅   |
+| 05 | Module System                     |    ✅   |
+| 06 | Service Layer                     |    ✅   |
+| 07 | CLI & Generator                   |    ✅   |
+| 08 | Resource / API                    |    ✅   |
+| 09 | Database E2E & ORM                |   🔴   |
+| 10 | Golden Path Integration           |   🔴   |
+| 11 | Validation & Request Pipeline     |    ⏳   |
+| 12 | Testing System                    |    ⏳   |
+| 13 | Diagnostics & Developer Tools     |    ⏳   |
+| 14 | Events / Jobs / Queue / Scheduler |    ⏳   |
+| 15 | WebSocket / Realtime              |    ⏳   |
+| 16 | Application Essentials            |    ⏳   |
+| 17 | LLM Intelligence                  |    ⏳   |
+| 18 | Architecture Guard                |    ⏳   |
+| 19 | Framework Discoverability         |    ⏳   |
+| 20 | Final Integration & LLM Benchmark |    ⏳   |
+
+The roadmap is not intended to turn Betrayer into a feature-heavy clone of another framework.
+
+The objective is to build capabilities that materially reduce the work required for an LLM to create and maintain real applications.
+
+---
+
+## Development Philosophy
+
+Betrayer prioritizes:
+
+```text
+LLM efficiency
+    ↓
+Application simplicity
+    ↓
+Predictable architecture
+    ↓
+Composable capabilities
+    ↓
+Real working applications
+```
+
+Features are not valuable merely because they exist.
+
+A feature is valuable when it helps an application — and especially an LLM building that application — accomplish its work with less unnecessary complexity.
+
+---
+
+## Relationship With Coding Agents
+
+Betrayer is designed to work naturally with coding agents.
+
+A coding agent should not need special knowledge of Betrayer's internal source code.
+
+Instead, the framework should expose generic, machine-readable capabilities that any compatible agent can discover and use.
+
+Conceptually:
+
+```text
+Coding Agent
+     │
+     │ generic capability interface
+     ↓
+Betrayer
+     │
+     ├── Application
+     ├── CLI
+     ├── Generators
+     ├── Database
+     ├── Web/API
+     ├── Workers
+     └── Other capabilities
+```
+
+This keeps the framework independent from any particular coding agent.
+
+---
+
+## Project Status
+
+Betrayer is an experimental framework under active development.
+
+The architecture, APIs, generators, and capabilities may change as the project evolves.
+
+The current priority is not production readiness or feature completeness.
+
+The priority is proving the core idea:
+
+> **Can a general-purpose application framework make it significantly easier for an LLM to build, understand, debug, and extend real applications?**
+
+That is the direction of Betrayer.

@@ -76,7 +76,7 @@ def web_error_to_response(error: WebError, *, details: Any = None) -> Response:
     validation details (for example) reach the wire.
     """
     status = int(error.http_status) if hasattr(error, "http_status") else 500
-    message = str(error)
+    message = getattr(error, "message", None) or str(error)
     code = getattr(error, "code", "WEB_ERROR")
     return ApiResponse.error(
         message=message,
@@ -92,6 +92,11 @@ def register_web_error_handlers(app: "Flask") -> None:
     This function attaches handlers for every ``WebError`` subclass so
     that unhandled Betrayer exceptions produce the correct JSON response
     automatically.
+
+    Handlers return a **Flask** response (the Betrayer
+    :class:`~betrayer.web.response.Response` is converted with
+    ``to_flask()``), so Flask 3.x accepts them through the standard
+    ``register_error_handler`` contract.
 
     Usage::
 
@@ -112,7 +117,7 @@ def register_web_error_handlers(app: "Flask") -> None:
         def _make_handler(
             _cls: type = exc_cls,
         ) -> Any:
-            def handler(error: Exception) -> Response:  # type: ignore[misc]
+            def handler(error: Exception) -> Any:
                 # Classify via bridge for consistent diagnostics
                 classified = bridge.classify(error)
                 status = classified.get("status", 500)
@@ -122,7 +127,7 @@ def register_web_error_handlers(app: "Flask") -> None:
                     message=message,
                     status=status,
                     code=code,
-                )
+                ).to_flask()
 
             handler.__name__ = f"_handle_{_cls.__name__}"  # type: ignore[attr-defined]
             return handler
@@ -130,7 +135,7 @@ def register_web_error_handlers(app: "Flask") -> None:
         app.register_error_handler(exc_cls, _make_handler())
 
     # -- Fallback: catch-all for any BaseException --------------------
-    def _catchall(error: BaseException) -> Response:
+    def _catchall(error: BaseException) -> Any:
         classified = bridge.classify(error)
         status = classified.get("status", 500)
         code = classified.get("code", "INTERNAL_SERVER_ERROR")
@@ -139,6 +144,6 @@ def register_web_error_handlers(app: "Flask") -> None:
             message=message,
             status=status,
             code=code,
-        )
+        ).to_flask()
 
     app.register_error_handler(Exception, _catchall)

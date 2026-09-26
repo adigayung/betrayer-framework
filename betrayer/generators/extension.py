@@ -1,0 +1,253 @@
+"""Extension generator for the Betrayer Framework.
+
+Creates a new extension skeleton inside an existing BetLayer project.  An
+extension adds *capability* to the framework/application (``admin-ui``,
+``metrics-export``, ``task-queue``) without touching core -- it is *not* a
+structural module.  The skeleton follows the exact contract of
+:class:`betrayer.core.extension.Extension`: a class with a ``name``, a
+``version``, dependency information and optional lifecycle hooks
+(``register`` / ``verify`` / ``initialize`` / ``shutdown``) that the
+:class:`~betrayer.core.extension.ExtensionRegistry` drives.
+
+The generated extension lives in an ``extensions/<snake_case>`` package so it
+can be imported and registered on an application's registry::
+
+    from extensions.payments import PaymentsExtension
+
+    app.extensions.register(PaymentsExtension)
+
+Scope: this generator ONLY creates an extension skeleton.  It reuses the exact
+abstractions the framework already provides (``BaseGenerator``,
+``GeneratorError``, ``GeneratorOutput``, naming helpers and the
+``Extension`` contract) -- no new extension subsystem is introduced.
+
+Example usage::
+
+    bet make extension payments
+    bet make extension metrics-export --force
+    bet make extension admin-ui --json
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Dict, Optional
+
+from betrayer.generators.base import (
+    BaseGenerator,
+    GeneratorError,
+    GeneratorOutput,
+    package_name,
+    title_case,
+    validate_project_name,
+)
+
+__all__ = ["ExtensionGenerator", "validate_extension_name", "EXTENSION_VERSION"]
+
+#: Initial version assigned to a freshly generated extension.
+EXTENSION_VERSION = "0.1.0"
+
+#: Directory (relative to the project root) extensions are written into.
+EXTENSION_DIRECTORY = "extensions"
+
+
+def validate_extension_name(name: str) -> Optional[str]:
+    """Return a human readable error message, or ``None`` when ``name`` is OK.
+
+    Extension names follow the same convention as project / module / resource
+    names (letters, digits, ``-`` and ``_``; must start with a letter) so the
+    CLI surface stays consistent.  The message is phrased in terms of an
+    *extension* though.
+    """
+    error = validate_project_name(name)
+    if error:
+        return error.replace("project name", "extension name")
+    return None
+
+
+class ExtensionGenerator(BaseGenerator):
+    """Generate a new extension skeleton package.
+
+    ``name`` is the name chosen on the command line; the importable package is
+    the ``snake_case`` form of ``name`` under ``extensions/`` (so ``bet make
+    extension metrics-export`` produces ``extensions/metrics_export/``).  The
+    generated :class:`~betrayer.core.extension.Extension` subclass is named
+    ``<TitleCase>Extension`` (``metrics_export`` -> ``MetricsExportExtension``)
+    and registers itself with the extension registry.
+    """
+
+    name = "extension"
+    description = "Create a new extension skeleton in the current project"
+
+    def __init__(
+        self,
+        name: str,
+        output_dir: Path,
+        overwrite: bool = False,
+    ) -> None:
+        error = validate_extension_name(name)
+        if error:
+            raise GeneratorError(f"invalid extension name: {error}")
+        self.requested_name = name
+        self.package = package_name(name)
+        super().__init__(
+            output_dir=Path(output_dir) / EXTENSION_DIRECTORY / self.package,
+            overwrite=overwrite,
+        )
+
+    @property
+    def target(self) -> Path:
+        """The directory the new extension package is created in."""
+        return self.output_dir
+
+    @property
+    def extension_name(self) -> str:
+        """The extension's ``name`` attribute (its snake_case package name)."""
+        return self.package
+
+    @property
+    def class_name(self) -> str:
+        """Name of the generated :class:`~betrayer.core.extension.Extension` subclass."""
+        return f"{title_case(self.package)}Extension"
+
+    # ── structure ──────────────────────────────────────────────────
+
+    def _extensions_init_py(self) -> str:
+        """Content of the ``extensions`` package marker (written once)."""
+        return f'''"""Generated extension packages for this BetLayer application.
+
+Each sub-package under ``{EXTENSION_DIRECTORY}/`` implements the
+:class:`betrayer.core.extension.Extension` contract and is registered on an
+application's ``app.extensions`` registry.
+"""
+
+from __future__ import annotations
+
+__all__: list[str] = []
+'''
+
+    def _files(self) -> Dict[str, str]:
+        """Deterministic mapping of relative path -> file content."""
+        return {
+            "__init__.py": self._init_py(),
+            "extension.py": self._extension_py(),
+        }
+
+    def _init_py(self) -> str:
+        class_name = self.class_name
+        return f'''"""The ``{self.extension_name}`` extension package.
+
+Generated by ``bet make extension {self.requested_name}``.
+
+Public API::
+
+    {class_name}    the extension (an ``Extension`` subclass)
+
+Register it on an application::
+
+    from extensions.{self.extension_name} import {class_name}
+
+    app.extensions.register({class_name})
+"""
+
+from __future__ import annotations
+
+from extensions.{self.extension_name}.extension import {class_name}
+
+__all__ = ["{class_name}"]
+'''
+
+    def _extension_py(self) -> str:
+        class_name = self.class_name
+        return f'''"""The ``{self.extension_name}`` extension.
+
+Generated by ``bet make extension {self.requested_name}``.
+
+An extension adds *capability* to a BetLayer application without touching
+core.  It implements the :class:`betrayer.core.extension.Extension` contract
+-- name, version, optional dependencies and lifecycle hooks -- and is driven
+by the application's :class:`~betrayer.core.extension.ExtensionRegistry`:
+
+    register      installed into the registry (declare components/providers)
+    verify        optional precondition check (compatibility)
+    initialize    run after Foundation bootstrap
+    shutdown      cleanup (runs in reverse registration order)
+
+Hook bodies are intentionally empty: fill in only what this extension really
+needs.  See ``betrayer.core.extension`` for the full contract.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Tuple
+
+from betrayer.core.extension import Extension
+
+__all__ = ["{class_name}"]
+
+
+class {class_name}(Extension):
+    """The ``{self.extension_name}`` extension."""
+
+    name = "{self.extension_name}"
+    version = "{EXTENSION_VERSION}"
+    dependencies: Tuple[str, ...] = ()
+    metadata = {{"description": "the {self.extension_name} extension"}}
+
+    def register(self, context: Any) -> None:
+        """Install the extension: register components, providers, events."""
+
+    def verify(self, context: Any) -> None:
+        """Check preconditions (optional compatibility check)."""
+
+    def initialize(self, context: Any) -> None:
+        """Run after Foundation bootstrap."""
+
+    def shutdown(self, context: Any) -> None:
+        """Cleanup hook, runs in reverse registration order."""
+'''
+
+    # ── generation ─────────────────────────────────────────────────
+
+    def generate(self) -> GeneratorOutput:
+        """Create the extension package and every generated file.
+
+        Raises :class:`GeneratorError` when the target already exists and is
+        not empty and ``overwrite`` is False, so an existing extension is never
+        overwritten silently.
+        """
+        if not self.overwrite and self._target_occupied():
+            raise GeneratorError(
+                "extension already exists (use --force to overwrite): "
+                f"{self.output_dir}"
+            )
+        self._ensure_directory(self.output_dir)
+        # Make ``extensions/`` an importable package.  This marker is written
+        # once -- it is shared by every generated extension, so it must never
+        # be overwritten by a later ``--force`` run for another extension.
+        self._ensure_directory(self.output_dir.parent)
+        self._write_extensions_package_marker()
+        for relative, content in self._files().items():
+            try:
+                self._write(relative, content)
+            except GeneratorError as exc:  # pragma: no cover - defensive
+                self.output.add_error(relative, exc)
+        return self.output
+
+    def _write_extensions_package_marker(self) -> None:
+        """Write ``extensions/__init__.py`` unless it already exists."""
+        package_init = self.output_dir.parent / "__init__.py"
+        if package_init.exists():
+            return
+        package_init.parent.mkdir(parents=True, exist_ok=True)
+        package_init.write_text(self._extensions_init_py(), encoding="utf-8")
+        self.output.add_created(self._get_relative_path(package_init))
+
+    def _target_occupied(self) -> bool:
+        """True when the target directory exists and is not empty."""
+        if not self.output_dir.exists():
+            return False
+        try:
+            return any(self.output_dir.iterdir())
+        except OSError:
+            return True

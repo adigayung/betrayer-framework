@@ -1,29 +1,32 @@
 {
-  "architecture_version": "1.0.0",
-  "commands": [
-    "info",
-    "environment",
-    "status",
-    "config",
-    "doctor",
-    "validate",
-    "manifest"
-  ],
-  "description": "LLM-first Python framework for coding agents",
-  "foundation_version": "0.1.0",
-  "framework": "Betrayer",
-  "package_roots": [
-    "betrayer"
-  ],
-  "packages": [
-    "betrayer",
-    "betrayer.cli",
-    "betrayer.core",
-    "betrayer.data",
-    "betrayer.diagnostics",
-    "betrayer.infrastructure",
-    "betrayer.runtime",
-    "betrayer.web"
-  ],
-  "version": "0.1.0"
+    "framework": "Betrayer",
+    "version": "0.1.0",
+    "foundation_version": "0.1.0",
+    "architecture_version": "1.0.0",
+    "commands": [
+        "info",
+        "environment",
+        "status",
+        "config",
+        "doctor",
+        "validate",
+        "manifest",
+        "create",
+        "make"
+    ],
+    "packages": [
+        "betrayer",
+        "betrayer.cli",
+        "betrayer.core",
+        "betrayer.data",
+        "betrayer.diagnostics",
+        "betrayer.generators",
+        "betrayer.infrastructure",
+        "betrayer.runtime",
+        "betrayer.web"
+    ],
+    "package_roots": [
+        "betrayer"
+    ],
+    "description": "LLM-first Python framework for coding agents"
 }

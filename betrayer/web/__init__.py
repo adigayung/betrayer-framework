@@ -29,6 +29,13 @@ from betrayer.web.context import WebContext
 from betrayer.web.request import Request
 from betrayer.web.response import Response, ApiResponse
 from betrayer.web.routing import Route, WebRouter as Router
+from betrayer.web.adapter import FlaskAdapter, route_is_async
+from betrayer.web.resource import (
+    ApiResource,
+    CrudApiResource,
+    ResourceRegistry,
+    register_web_router,
+)
 from betrayer.web.middleware import WebMiddlewareRegistry
 from betrayer.web.exceptions import (
     HTTP_STATUS_CODES,
@@ -57,6 +64,12 @@ __all__ = [
     "ApiResponse",
     "Route",
     "Router",
+    "FlaskAdapter",
+    "route_is_async",
+    "ApiResource",
+    "CrudApiResource",
+    "ResourceRegistry",
+    "register_web_router",
     "WebMiddlewareRegistry",
     "HTTP_STATUS_CODES",
     "WebError",

@@ -145,6 +145,40 @@ lifecycle, and registry. It is passed to subsystems — not a global singleton.
 Every command supports `--json` (valid JSON, sorted keys) and returns a real
 exit code: `0` = success, non-zero = failure.
 
+## Resource / API Runtime
+
+A resource is a thin, declarative endpoint collection backed by the existing
+Betrayer web abstractions (`WebRouter`, `WebContext`, `Request`, `Response`,
+`ApiResponse`).  The runtime layer mounts routes on Flask through
+`FlaskAdapter`; it never introduces a second API framework.
+
+```python
+from betrayer.web import ApiResource, ApiResponse, CrudApiResource, FlaskAdapter
+
+class ProductResource(CrudApiResource):
+    name = "product"
+    prefix = "/api/v1"
+
+# serve a router (e.g. one created by `bet make resource` / `bet make crud`)
+from betrayer.application import BetrayerApplication
+adapter = FlaskAdapter(BetrayerApplication(name="app"), ProductResource(service=service).resource_router())
+flask_app = adapter.build()          # a real Flask app
+```
+
+The flow is always `HTTP Request -> Resource -> Service -> Repository/Data`:
+resources delegate to a service resolved from the container
+(`context.resolve("<name>_service")`) and never take over business logic.
+
+**Generated resource compatibility** — `bet make resource <name>` and
+`bet make crud <name>` produce a `routes.py` with `register_routes(router)`;
+call that to populate the router, then mount it with `FlaskAdapter`.
+
+**Error handling** — every error becomes a controlled JSON response using the
+Betrayer envelope `{"success", "data", "error"}`; raised `WebError` subclasses
+map to their documented status (`BadRequestError`→400,
+`NotFoundError`→404, `ValidationError`→422, `InternalServerError`→500) and
+unexpected exceptions never leak a traceback.
+
 ## Generated Metadata
 
 `.betrayer/manifest.json` and `.betrayer/architecture.json` are GENERATED,

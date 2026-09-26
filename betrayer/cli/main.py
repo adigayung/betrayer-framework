@@ -55,8 +55,10 @@ COMMAND_HELP = {
     "config": "show effective configuration (secrets masked)",
     "doctor": "run foundation health checks",
     "validate": "validate the foundation (imports, structure, lifecycle, ...)",
-    "manifest": "show or regenerate the machine readable framework manifest",
-}
+        "manifest": "show or regenerate the machine readable framework manifest",
+        "create": "create a new BetLayer application project",
+        "make": "generate project artifacts (e.g. a new module or resource)",
+    }
 
 REQUIRED_MODULES = (
     "betrayer",
@@ -602,6 +604,492 @@ def _cmd_manifest(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_create(args: argparse.Namespace) -> int:
+    """Create a new BetLayer application project in the current directory.
+
+    ``create`` is the one command that does not build a READY application
+    first: it generates a project on disk, so there is no application to
+    inspect yet.  Controlled failures (invalid name, existing directory) raise
+    :class:`CommandError` and return the framework CLI failure exit code.
+    """
+    from betrayer.generators.project import ProjectGenerator
+
+    as_json = _as_json(args)
+    name = args.project_name
+    force = bool(getattr(args, "force", False))
+    try:
+        generator = ProjectGenerator(name=name, output_dir=Path.cwd(), overwrite=force)
+    except Exception as exc:  # noqa: BLE001 - name validation failure
+        raise CommandError(str(exc)) from exc
+    try:
+        output = generator.generate()
+    except Exception as exc:  # noqa: BLE001 - existing directory, write failure
+        raise CommandError(str(exc)) from exc
+    if not output.success:
+        detail = "; ".join(
+            f"{e['path']}: {e['message']}" for e in output.errors
+        )
+        raise CommandError(f"failed to create project: {detail}")
+    if as_json:
+        _print_json(
+            {
+                "project": str(generator.target),
+                "created": output.created,
+                "updated": output.updated,
+                "skipped": output.skipped,
+            }
+        )
+        return 0
+    print(f"Created BetLayer project: {generator.target}")
+    for relative in output.created:
+        print(f"  created {relative}")
+    print("Run it with:")
+    print(f"  cd {name} && python run.py")
+    print("Test it with:")
+    print(f"  cd {name} && pytest")
+    return 0
+
+
+def _configure_create(parser: argparse.ArgumentParser) -> None:
+    """Add ``create`` specific arguments (registered with the command)."""
+    parser.add_argument(
+        "project_name",
+        help="new project name (letters, digits, '-' and '_'; must start with a letter)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="populate an existing, non-empty directory instead of failing",
+    )
+
+
+#: ``bet make <target>`` handlers.  ``make`` is a thin dispatcher: each target is
+#: a small function registered here, so adding a target touches one place --
+#: exactly like a top level command registers one :class:`Command`.
+_MAKE_HANDLERS: dict[str, Callable[[argparse.Namespace], int]] = {}
+
+
+def _cmd_make_module(args: argparse.Namespace) -> int:
+    """Create a new application module in the current directory.
+
+    Like ``create`` this does not build a READY application first: it generates
+    files on disk.  Controlled failures (invalid name, existing module) raise
+    :class:`CommandError` and return the framework CLI failure exit code.
+    """
+    from betrayer.generators.module import ModuleGenerator
+
+    as_json = _as_json(args)
+    name = args.module_name
+    force = bool(getattr(args, "force", False))
+    try:
+        generator = ModuleGenerator(name=name, output_dir=Path.cwd(), overwrite=force)
+    except Exception as exc:  # noqa: BLE001 - name validation failure
+        raise CommandError(str(exc)) from exc
+    try:
+        output = generator.generate()
+    except Exception as exc:  # noqa: BLE001 - existing module, write failure
+        raise CommandError(str(exc)) from exc
+    if not output.success:
+        detail = "; ".join(
+            f"{e['path']}: {e['message']}" for e in output.errors
+        )
+        raise CommandError(f"failed to create module: {detail}")
+    if as_json:
+        _print_json(
+            {
+                "module": generator.module_name,
+                "path": str(generator.target),
+                "created": output.created,
+                "updated": output.updated,
+                "skipped": output.skipped,
+            }
+        )
+        return 0
+    print(f"Created module: {generator.module_name} ({generator.target})")
+    for relative in output.created:
+        print(f"  created {relative}")
+    for relative in output.updated:
+        print(f"  updated {relative}")
+    print("Register it in your application with:")
+    print(f"  app.modules.register({generator.class_name})")
+    return 0
+
+
+_MAKE_HANDLERS["module"] = _cmd_make_module
+
+
+def _cmd_make_resource(args: argparse.Namespace) -> int:
+    """Create a new data resource in the current directory.
+
+    Like ``create`` this does not build a READY application first: it generates
+    files on disk.  Controlled failures (invalid name, existing resource) raise
+    :class:`CommandError` and return the framework CLI failure exit code.
+    """
+    from betrayer.generators.resource import ResourceGenerator
+
+    as_json = _as_json(args)
+    name = args.resource_name
+    force = bool(getattr(args, "force", False))
+    try:
+        generator = ResourceGenerator(name=name, output_dir=Path.cwd(), overwrite=force)
+    except Exception as exc:  # noqa: BLE001 - name validation failure
+        raise CommandError(str(exc)) from exc
+    try:
+        output = generator.generate()
+    except Exception as exc:  # noqa: BLE001 - existing resource, write failure
+        raise CommandError(str(exc)) from exc
+    if not output.success:
+        detail = "; ".join(
+            f"{e['path']}: {e['message']}" for e in output.errors
+        )
+        raise CommandError(f"failed to create resource: {detail}")
+    if as_json:
+        _print_json(
+            {
+                "resource": generator.resource_name,
+                "path": str(generator.target),
+                "model_class": generator.model_class_name,
+                "repository_class": generator.repository_class_name,
+                "module_class": generator.module_class_name,
+                "created": output.created,
+                "updated": output.updated,
+                "skipped": output.skipped,
+            }
+        )
+        return 0
+    print(f"Created resource: {generator.resource_name} ({generator.target})")
+    for relative in output.created:
+        print(f"  created {relative}")
+    for relative in output.updated:
+        print(f"  updated {relative}")
+    print("Register it in your application with:")
+    print(f"  app.modules.register({generator.module_class_name})")
+    return 0
+
+
+_MAKE_HANDLERS["resource"] = _cmd_make_resource
+
+
+def _cmd_make_service(args: argparse.Namespace) -> int:
+    """Create a new application service in the current directory.
+
+    Like ``create`` this does not build a READY application first: it generates
+    files on disk.  Controlled failures (invalid name, existing service) raise
+    :class:`CommandError` and return the framework CLI failure exit code.
+    """
+    from betrayer.generators.service import ServiceGenerator
+
+    as_json = _as_json(args)
+    name = args.service_name
+    force = bool(getattr(args, "force", False))
+    try:
+        generator = ServiceGenerator(name=name, output_dir=Path.cwd(), overwrite=force)
+    except Exception as exc:  # noqa: BLE001 - name validation failure
+        raise CommandError(str(exc)) from exc
+    try:
+        output = generator.generate()
+    except Exception as exc:  # noqa: BLE001 - existing service, write failure
+        raise CommandError(str(exc)) from exc
+    if not output.success:
+        detail = "; ".join(
+            f"{e['path']}: {e['message']}" for e in output.errors
+        )
+        raise CommandError(f"failed to create service: {detail}")
+    if as_json:
+        _print_json(
+            {
+                "service": generator.service_key,
+                "path": str(generator.target),
+                "service_class": generator.service_class_name,
+                "module_class": generator.module_class_name,
+                "created": output.created,
+                "updated": output.updated,
+                "skipped": output.skipped,
+            }
+        )
+        return 0
+    print(f"Created service: {generator.service_key} ({generator.target})")
+    for relative in output.created:
+        print(f"  created {relative}")
+    for relative in output.updated:
+        print(f"  updated {relative}")
+    print("Register it in your application with:")
+    print(f"  app.modules.register({generator.module_class_name})")
+    return 0
+
+
+_MAKE_HANDLERS["service"] = _cmd_make_service
+
+
+def _cmd_make_crud(args: argparse.Namespace) -> int:
+    """Create a complete CRUD resource in the current directory.
+
+    Like ``create`` this does not build a READY application first: it generates
+    files on disk.  Controlled failures (invalid name, existing resource) raise
+    :class:`CommandError` and return the framework CLI failure exit code.
+    """
+    from betrayer.generators.crud import CrudGenerator
+
+    as_json = _as_json(args)
+    name = args.resource_name
+    force = bool(getattr(args, "force", False))
+    try:
+        generator = CrudGenerator(name=name, output_dir=Path.cwd(), overwrite=force)
+    except Exception as exc:  # noqa: BLE001 - name validation failure
+        raise CommandError(str(exc)) from exc
+    try:
+        output = generator.generate()
+    except Exception as exc:  # noqa: BLE001 - existing resource, write failure
+        raise CommandError(str(exc)) from exc
+    if not output.success:
+        detail = "; ".join(
+            f"{e['path']}: {e['message']}" for e in output.errors
+        )
+        raise CommandError(f"failed to create crud resource: {detail}")
+    if as_json:
+        _print_json(
+            {
+                "resource": generator.resource_name,
+                "path": str(generator.target),
+                "model_class": generator.model_class_name,
+                "repository_class": generator.repository_class_name,
+                "service_class": generator.service_class_name,
+                "module_class": generator.module_class_name,
+                "created": output.created,
+                "updated": output.updated,
+                "skipped": output.skipped,
+            }
+        )
+        return 0
+    print(f"Created CRUD resource: {generator.resource_name} ({generator.target})")
+    for relative in output.created:
+        print(f"  created {relative}")
+    for relative in output.updated:
+        print(f"  updated {relative}")
+    print("Register it in your application with:")
+    print(f"  app.modules.register({generator.module_class_name})")
+    return 0
+
+
+_MAKE_HANDLERS["crud"] = _cmd_make_crud
+
+
+def _cmd_make_migration(args: argparse.Namespace) -> int:
+    """Create a new database migration file in the current directory.
+
+    Like ``create`` this does not build a READY application first: it generates
+    one file on disk.  Controlled failures (invalid name, existing migration)
+    raise :class:`CommandError` and return the framework CLI failure exit code.
+    """
+    from betrayer.generators.migration import MigrationGenerator
+
+    as_json = _as_json(args)
+    name = args.migration_name
+    force = bool(getattr(args, "force", False))
+    try:
+        generator = MigrationGenerator(name=name, output_dir=Path.cwd(), overwrite=force)
+    except Exception as exc:  # noqa: BLE001 - name validation failure
+        raise CommandError(str(exc)) from exc
+    try:
+        output = generator.generate()
+    except Exception as exc:  # noqa: BLE001 - existing migration, write failure
+        raise CommandError(str(exc)) from exc
+    if not output.success:
+        detail = "; ".join(
+            f"{e['path']}: {e['message']}" for e in output.errors
+        )
+        raise CommandError(f"failed to create migration: {detail}")
+    if as_json:
+        _print_json(
+            {
+                "migration": generator.migration_name,
+                "sequence": generator.sequence,
+                "file": generator.file_name,
+                "path": str(generator.target),
+                "created": output.created,
+                "updated": output.updated,
+                "skipped": output.skipped,
+            }
+        )
+        return 0
+    print(f"Created migration: {generator.migration_name} ({generator.file_name})")
+    for relative in output.created:
+        print(f"  created {relative}")
+    for relative in output.updated:
+        print(f"  updated {relative}")
+    print("Register it in your migration registry with:")
+    print(f"  from {generator.module_import} import {generator.class_name}")
+    return 0
+
+
+_MAKE_HANDLERS["migration"] = _cmd_make_migration
+
+
+def _cmd_make_extension(args: argparse.Namespace) -> int:
+    """Create a new extension skeleton in the current directory.
+
+    Like ``create`` this does not build a READY application first: it generates
+    files on disk.  Controlled failures (invalid name, existing extension)
+    raise :class:`CommandError` and return the framework CLI failure exit code.
+    """
+    from betrayer.generators.extension import ExtensionGenerator
+
+    as_json = _as_json(args)
+    name = args.extension_name
+    force = bool(getattr(args, "force", False))
+    try:
+        generator = ExtensionGenerator(name=name, output_dir=Path.cwd(), overwrite=force)
+    except Exception as exc:  # noqa: BLE001 - name validation failure
+        raise CommandError(str(exc)) from exc
+    try:
+        output = generator.generate()
+    except Exception as exc:  # noqa: BLE001 - existing extension, write failure
+        raise CommandError(str(exc)) from exc
+    if not output.success:
+        detail = "; ".join(
+            f"{e['path']}: {e['message']}" for e in output.errors
+        )
+        raise CommandError(f"failed to create extension: {detail}")
+    if as_json:
+        _print_json(
+            {
+                "extension": generator.extension_name,
+                "path": str(generator.target),
+                "extension_class": generator.class_name,
+                "created": output.created,
+                "updated": output.updated,
+                "skipped": output.skipped,
+            }
+        )
+        return 0
+    print(f"Created extension: {generator.extension_name} ({generator.target})")
+    for relative in output.created:
+        print(f"  created {relative}")
+    for relative in output.updated:
+        print(f"  updated {relative}")
+    print("Register it in your application with:")
+    print(f"  app.extensions.register({generator.class_name})")
+    return 0
+
+
+_MAKE_HANDLERS["extension"] = _cmd_make_extension
+
+
+def _cmd_make(args: argparse.Namespace) -> int:
+    """Dispatch ``bet make <target>`` to the matching generator command."""
+    target = getattr(args, "make_target", None)
+    available = ", ".join(sorted(_MAKE_HANDLERS))
+    if target is None:
+        raise CommandError(f"make requires a target (available: {available})")
+    handler = _MAKE_HANDLERS.get(target)
+    if handler is None:
+        raise CommandError(
+            f"unknown make target: {target!r} (available: {available})"
+        )
+    return handler(args)
+
+
+def _configure_make(parser: argparse.ArgumentParser) -> None:
+    """Add the ``make`` subcommands (``bet make module <name>``, ``bet make resource <name>``, ...).
+
+    ``make`` groups generators under a single top level command while keeping
+    the flat registry: the nested subparser only selects a target, the actual
+    work lives in the per target handler above.
+    """
+    subparsers = parser.add_subparsers(dest="make_target", metavar="target")
+    module_parser = subparsers.add_parser(
+        "module", help="create a new application module"
+    )
+    module_parser.add_argument(
+        "module_name",
+        help="new module name (letters, digits, '-' and '_'; must start with a letter)",
+    )
+    module_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing module instead of failing",
+    )
+    module_parser.add_argument(
+        "--json", action="store_true", help="emit machine readable JSON output"
+    )
+    resource_parser = subparsers.add_parser(
+        "resource", help="create a new data resource (model + repository + routes)"
+    )
+    resource_parser.add_argument(
+        "resource_name",
+        help="new resource name (letters, digits, '-' and '_'; must start with a letter)",
+    )
+    resource_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing resource instead of failing",
+    )
+    resource_parser.add_argument(
+        "--json", action="store_true", help="emit machine readable JSON output"
+    )
+    service_parser = subparsers.add_parser(
+        "service", help="create a new application service"
+    )
+    service_parser.add_argument(
+        "service_name",
+        help="new service name (letters, digits, '-' and '_'; must start with a letter)",
+    )
+    service_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing service instead of failing",
+    )
+    service_parser.add_argument(
+        "--json", action="store_true", help="emit machine readable JSON output"
+    )
+    crud_parser = subparsers.add_parser(
+        "crud",
+        help="create a complete CRUD resource (model + repository + service + routes)",
+    )
+    crud_parser.add_argument(
+        "resource_name",
+        help="new resource name (letters, digits, '-' and '_'; must start with a letter)",
+    )
+    crud_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing resource instead of failing",
+    )
+    crud_parser.add_argument(
+        "--json", action="store_true", help="emit machine readable JSON output"
+    )
+    migration_parser = subparsers.add_parser(
+        "migration", help="create a new database migration file"
+    )
+    migration_parser.add_argument(
+        "migration_name",
+        help="new migration name (letters, digits, '-' and '_'; must start with a letter)",
+    )
+    migration_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing migration instead of failing",
+    )
+    migration_parser.add_argument(
+        "--json", action="store_true", help="emit machine readable JSON output"
+    )
+    extension_parser = subparsers.add_parser(
+        "extension", help="create a new extension skeleton"
+    )
+    extension_parser.add_argument(
+        "extension_name",
+        help="new extension name (letters, digits, '-' and '_'; must start with a letter)",
+    )
+    extension_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing extension instead of failing",
+    )
+    extension_parser.add_argument(
+        "--json", action="store_true", help="emit machine readable JSON output"
+    )
+
+
 def _configure_manifest(parser: argparse.ArgumentParser) -> None:
     """Add ``manifest`` specific flags (registered with the command)."""
     parser.add_argument(
@@ -628,6 +1116,12 @@ def build_command_registry() -> CommandRegistry:
     registry.register(Command("validate", COMMAND_HELP["validate"], _cmd_validate))
     registry.register(
         Command("manifest", COMMAND_HELP["manifest"], _cmd_manifest, configure=_configure_manifest)
+    )
+    registry.register(
+        Command("create", COMMAND_HELP["create"], _cmd_create, configure=_configure_create)
+    )
+    registry.register(
+        Command("make", COMMAND_HELP["make"], _cmd_make, configure=_configure_make)
     )
     return registry
 

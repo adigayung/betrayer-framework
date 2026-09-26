@@ -1,206 +1,365 @@
-"""Project generator for Betrayer Framework.
+"""Project generator for the Betrayer Framework.
 
-Creates a minimal Betrayer application structure with:
-- app.py - main application file
-- templates/ directory
-- tests/ directory
-- README.md
-- .gitignore
+Creates a new, runnable BetLayer application project that uses the exact same
+architecture as the ``example/`` project in the framework repository:
+``run.py`` + ``<package>/app.py`` built on ``BetrayerApplication``,
+``Bootstrap`` and ``Config``.  A generated project is deterministic, small and
+fully inspectable -- it never introduces a parallel structure.
+
+Scope: this generator ONLY creates a new project.  Module / resource / service
+/ CRUD / migration / extension generators are separate tasks and are NOT
+implemented here.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
-from betrayer.generators.base import GeneratorResult, TemplateGenerator
+from betrayer.core.meta import FRAMEWORK_NAME, __version__
+from betrayer.generators.base import (
+    BaseGenerator,
+    GeneratorError,
+    GeneratorOutput,
+    package_name,
+    title_case,
+    validate_project_name,
+)
 
-if TYPE_CHECKING:
-    from ..main import CliContext
+__all__ = ["ProjectGenerator", "GENERATED_VERSION"]
+
+#: Version this generator's output shape corresponds to (the framework version).
+GENERATED_VERSION = __version__
 
 
-class ProjectGenerator(TemplateGenerator):
-    """Generate a new Betrayer application project."""
+class ProjectGenerator(BaseGenerator):
+    """Generate a new BetLayer application project directory.
 
-    def __init__(self, context: CliContext, output_dir: Path, overwrite: bool = False):
-        super().__init__(context, output_dir)
-        self.overwrite = overwrite
+    ``name`` is the directory name chosen on the command line; the importable
+    package inside the project is the ``snake_case`` form of ``name`` (so
+    ``bet create my-app`` produces ``my-app/my_app/``).
+    """
 
-    def generate(self) -> GeneratorResult:
-        """Create minimal Betrayer project structure.
+    name = "project"
+    description = "Create a new BetLayer application project"
 
-        Returns:
-            GeneratorResult with created/updated/skipped files and errors.
-        """
-        result = GeneratorResult()
+    def __init__(
+        self,
+        name: str,
+        output_dir: Path,
+        overwrite: bool = False,
+    ) -> None:
+        error = validate_project_name(name)
+        if error:
+            raise GeneratorError(f"invalid project name: {error}")
+        self.requested_name = name
+        self.package = package_name(name)
+        target = Path(output_dir) / name
+        super().__init__(output_dir=target, overwrite=overwrite)
 
-        # Define the minimal structure to create
-        files_to_create = self._define_project_structure()
+    @property
+    def target(self) -> Path:
+        """The directory the new project is created in."""
+        return self.output_dir
 
-        for rel_path, content in files_to_create.items():
-            target_path = self.output_dir / rel_path
-            try:
-                # Check if file exists
-                if target_path.exists():
-                    if self.overwrite:
-                        target_path.write_text(content)
-                        result.updated.append(str(rel_path))
-                    else:
-                        result.errors.append(
-                            f"File already exists: {rel_path} (use --force to overwrite)"
-                        )
-                        continue
+    @property
+    def display_name(self) -> str:
+        """TitleCase display name used in generated docs and output."""
+        return title_case(self.requested_name)
 
-                # Create parent directories
-                target_path.parent.mkdir(parents=True, exist_ok=True)
-                target_path.write_text(content)
-                result.created.append(str(rel_path))
-            except OSError as e:
-                result.errors.append(f"Failed to create {rel_path}: {e}")
+    # ── structure ──────────────────────────────────────────────
 
-        return result
+    def _files(self) -> Dict[str, str]:
+        """Deterministic mapping of relative path -> file content."""
+        full: Dict[str, str] = {}
+        full.update(self._run_py())
+        full.update(self._package_files())
+        full.update(self._test_files())
+        full.update(self._meta_files(structure=sorted(full)))
+        return full
 
-    def _define_project_structure(
-        self, app_name: str
-    ) -> Dict[str, str]:
-        """Define minimal project structure for Betrayer application."""
-        files = {}
+    def _run_py(self) -> Dict[str, str]:
+        return {
+            "run.py": f'''"""Run the {self.requested_name} application.
 
-        # Main application file
-        files["app.py"] = self._generate_app_py(app_name)
+Usage::
 
-        # Templates directory (empty but exists)
-        # templates/ is just a placeholder - no actual template files needed yet
+    python run.py
 
-        # Tests directory with basic test structure
-        files["tests/__init__.py"] = ""
-        files["tests/test_app.py"] = self._generate_test_app_py()
-
-        # README.md
-        files["README.md"] = self._generate_readme(app_name)
-
-        # .gitignore
-        files[".gitignore"] = self._generate_gitignore()
-
-        return files
-
-    def _generate_app_py(self, app_name: str) -> str:
-        """Generate main application file."""
-        return f'''"""{app_name.capitalize()} - A Betrayer application.
-
-This is a minimal Betrayer application generated by the framework CLI.
-Run with: python run.py
+The script adds the project root to ``sys.path`` so it works from a checkout
+without installing the package.
 """
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 
-def main() -> int:
-    """Main entry point for the application."""
-    print(f"Welcome to {app_name}!")
+PROJECT_ROOT = Path(__file__).resolve().parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from {self.package}.app import main  # noqa: E402  (import after sys.path setup)
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+''',
+        }
+
+    def _package_files(self) -> Dict[str, str]:
+        return {
+            f"{self.package}/__init__.py": f'''"""{self.display_name} - a BetLayer application package.
+
+Generated by ``bet create {self.requested_name}``.
+
+Public API::
+
+    build_application    create the application without running it
+    main                 bootstrap, run and shut down the application
+"""
+
+from __future__ import annotations
+
+__version__ = "{GENERATED_VERSION}"
+
+__all__ = ["__version__"]
+''',
+            f"{self.package}/app.py": f'''"""{self.display_name} - a BetLayer application built on {FRAMEWORK_NAME}.
+
+This application was generated by ``bet create {self.requested_name}``.  It
+shows the whole foundation lifecycle end to end::
+
+    BOOTSTRAP -> INITIALIZE -> READY -> RUNNING -> STOPPING -> STOPPED
+
+Run it with ``python run.py``.
+"""
+
+from __future__ import annotations
+
+from typing import Optional, Sequence
+
+from betrayer import BetrayerApplication, Bootstrap, Config
+
+APP_NAME = "{self.package}"
+APP_CONFIG = {{
+    "app.name": "{self.package}",
+    "app.debug": True,
+    "{self.package}.greeting": "hello from {self.requested_name}",
+}}
+
+
+def register_lifecycle_logging(app: BetrayerApplication) -> None:
+    """Attach print handlers so the lifecycle is observable."""
+    lifecycle = app.lifecycle
+    lifecycle.on_bootstrap(lambda state, application: print("BOOTSTRAP"))
+    lifecycle.on_initialize(lambda state, application: print("INITIALIZE"))
+    lifecycle.on_ready(lambda state, application: print("READY"))
+    lifecycle.on_start(lambda state, application: print("RUNNING"))
+    lifecycle.on_stop(lambda state, application: print("STOPPING"))
+    lifecycle.on_shutdown(lambda state, application: print("STOPPED"))
+    lifecycle.on_error(lambda state, application: print("FAILED"))
+
+
+def build_application() -> BetrayerApplication:
+    """Create the application without running it (inspectable and testable)."""
+    app = BetrayerApplication(name=APP_NAME, config=Config(defaults=APP_CONFIG))
+    register_lifecycle_logging(app)
+    return app
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Bootstrap, run, then shut down the application."""
+    app = build_application()
+    Bootstrap(app).build()  # BOOTSTRAP -> INITIALIZE -> READY
+    app.start()             # READY -> RUNNING
+
+    print(f"greeting: {{app.config.get(APP_NAME + '.greeting')}}")
+    print(f"state: {{app.state.value}}")
+
+    app.stop()              # RUNNING -> STOPPING
+    app.shutdown()          # STOPPING -> STOPPED
+
+    print(f"final state: {{app.state.value}}")
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-'''
+''',
+        }
 
-    def _generate_test_app_py(self) -> str:
-        """Generate basic test file for app."""
-        return '''"""Basic tests for the application."""
+    def _test_files(self) -> Dict[str, str]:
+        return {
+            "tests/__init__.py": "",
+            "tests/test_app.py": f'''"""Focused tests for the generated {self.requested_name} application."""
 
 from __future__ import annotations
 
+from betrayer import Bootstrap, LifecycleState
 
-def test_main_returns_zero() -> None:
-    """Test that main returns 0 on success."""
-    from app import main
+from {self.package}.app import APP_NAME, build_application
 
-    assert main() == 0
-'''
 
-    def _generate_readme(self, app_name: str) -> str:
-        """Generate README.md file."""
-        return f'''# {app_name.capitalize()}
+def test_app_identity() -> None:
+    """The application carries the generated name and config defaults."""
+    app = build_application()
+    assert app.config.get("app.name") == APP_NAME
+    assert app.state is LifecycleState.CREATED
 
-A minimal Betrayer application.
 
-## Getting Started
+def test_bootstrap_reaches_ready() -> None:
+    """A freshly built application becomes READY via Bootstrap."""
+    app = build_application()
+    Bootstrap(app).build()
+    assert app.is_ready()
+    assert app.state is LifecycleState.READY
+''',
+        }
+
+    def _meta_files(self, structure: List[str]) -> Dict[str, str]:
+        return {
+            "pyproject.toml": f'''[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "{self.package}"
+version = "{GENERATED_VERSION}"
+description = "{self.display_name} - a BetLayer application"
+requires-python = ">=3.10"
+dependencies = ["betrayer-framework"]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["{self.package}*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+''',
+            ".betrayer/project.json": (
+                '{\n'
+                f'  "project": "{self.package}",\n'
+                f'  "display_name": "{self.display_name}",\n'
+                f'  "framework": "{FRAMEWORK_NAME}",\n'
+                f'  "framework_version": "{GENERATED_VERSION}",\n'
+                f'  "generated_by": "bet create {self.requested_name}",\n'
+                '  "structure": ['
+                + ", ".join(f'"{rel}"' for rel in structure) +
+                ']\n'
+                '}\n'
+            ),
+            "README.md": f'''# {self.display_name}
+
+A new BetLayer application generated by the {FRAMEWORK_NAME} Framework CLI
+(``bet create {self.requested_name}``).
+
+## Requirements
+
+The application depends on the {FRAMEWORK_NAME} framework.  Install it first
+(Python >= 3.10):
+
+```bash
+pip install -e /path/to/betrayer-framework
+# or
+pip install "betrayer-framework"
+```
+
+## Run
 
 ```bash
 python run.py
 ```
 
+## Test
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
 ## Structure
 
-- `app.py` - Main application entry point
-- `templates/` - Template files directory
-- `tests/` - Test files
+- `run.py`            - entry point (makes the project root importable)
+- `{self.package}/`  - application package (``app.py`` is the composition root)
+- `tests/`            - pytest tests
+- `.betrayer/`        - generated project metadata
 
-## Betrayer Framework
+## Framework
 
-This application is built using the Betrayer Framework. Learn more at:
-https://github.com/betrayer/betrayer
-'''
-
-    def _generate_gitignore(self) -> str:
-        """Generate .gitignore file."""
-        return '''# Python
+Built on the {FRAMEWORK_NAME} Framework ({__version__}).  See the framework
+`ai/ARCHITECTURE.md` for the layer and dependency rules.
+''',
+            ".gitignore": '''# Python
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
+.eggs/
 .installed.cfg
 *.egg
 
 # Virtual environments
 venv/
+.venv/
 ENV/
 env/
 
-# IDE
+# IDE / editor
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# Environment variables
+# Environment
 .env
 .env.local
 
-# Runtime data
-pids/
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage
+# Test & coverage
+.pytest_cache/
 .coverage
 htmlcov/
-.pytest_cache/
 .tox/
 
-# Temporary files
-tmp/
-temp/
-*.tmp
-
-# OS files
+# OS
 .DS_Store
 Thumbs.db
-'''
+''',
+        }
+
+    # ── generation ─────────────────────────────────────────────
+
+    def generate(self) -> GeneratorOutput:
+        """Create the project directory and every generated file.
+
+        Raises :class:`GeneratorError` when the target already exists and is
+        not empty and ``overwrite`` is False, so an existing directory is never
+        overwritten silently.
+        """
+        if not self.overwrite and self._target_occupied():
+            raise GeneratorError(
+                "directory already exists and is not empty "
+                f"(use --force to populate it): {self.output_dir}"
+            )
+        self._ensure_directory(self.output_dir)
+        for relative, content in self._files().items():
+            try:
+                self._write(relative, content)
+            except GeneratorError as exc:  # pragma: no cover - defensive
+                self.output.add_error(relative, exc)
+        return self.output
+
+    def _target_occupied(self) -> bool:
+        """True when the target directory exists and is not empty."""
+        if not self.output_dir.exists():
+            return False
+        try:
+            return any(self.output_dir.iterdir())
+        except OSError:
+            return True

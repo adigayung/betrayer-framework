@@ -84,10 +84,22 @@ def status_code_name(status: int) -> str:
 
 
 def _http_exception_types() -> tuple:
-    """Return ``(HTTPException, RoutingException)`` from werkzeug (Flask's engine)."""
-    from werkzeug.exceptions import HTTPException, RoutingException
+    """Return ``(HTTPException, RoutingException)`` from werkzeug (Flask's engine).
 
-    return HTTPException, RoutingException
+    ``RoutingException`` was removed in newer Werkzeug releases (3.1+), so the
+    import is defensive: the bridge keeps working with the ``HTTPException``
+    base class whichever Werkzeug version is installed.
+    """
+    from werkzeug.exceptions import HTTPException
+
+    routing: Any = None
+    try:  # pragma: no cover - depends on the installed werkzeug version
+        from werkzeug.exceptions import RoutingException
+
+        routing = RoutingException
+    except ImportError:  # pragma: no cover - werkzeug >= 3.1
+        routing = HTTPException
+    return HTTPException, routing
 
 
 def map_http_exception(error: BaseException) -> Dict[str, Any]:

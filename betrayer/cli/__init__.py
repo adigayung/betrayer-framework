@@ -7,6 +7,15 @@ into ``core`` internals: it uses ``Bootstrap`` to build an application and
 
 from __future__ import annotations
 
-from betrayer.cli.main import build_parser, main, run_validate
+from betrayer.cli.main import build_command_registry, build_parser, main, run_validate
+from betrayer.cli.registry import Command, CommandError, CommandRegistry
 
-__all__ = ["build_parser", "main", "run_validate"]
+__all__ = [
+    "Command",
+    "CommandError",
+    "CommandRegistry",
+    "build_command_registry",
+    "build_parser",
+    "main",
+    "run_validate",
+]

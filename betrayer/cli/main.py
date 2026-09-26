@@ -8,6 +8,10 @@ Commands are intentionally few.  Every command:
 * supports ``--json`` for machine consumption (always valid JSON),
 * returns a real exit code (0 = success, non-zero = failure).
 
+Commands are wired up through a single :class:`betrayer.cli.registry.CommandRegistry`
+(see :func:`build_command_registry`); the parser and the dispatch loop only
+iterate that table, so a new command never requires redesigning the CLI core.
+
 Extension point: ``run_validate()`` is importable so tests and future
 tooling can reuse the same checks the CLI runs.
 """
@@ -22,6 +26,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
 from betrayer.bootstrap import Bootstrap
+from betrayer.cli.registry import Command, CommandError, CommandRegistry
 from betrayer.core.config import Config, is_secret_key
 from betrayer.core.environment import Environment
 from betrayer.core.exceptions import BetrayerError
@@ -40,7 +45,8 @@ PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 MANIFEST_PATH: Path = PROJECT_ROOT / ".betrayer" / "manifest.json"
 ARCHITECTURE_PATH: Path = PROJECT_ROOT / ".betrayer" / "architecture.json"
 
-COMMANDS = ("info", "environment", "status", "config", "doctor", "validate", "manifest")
+#: Name the CLI is invoked as (``bet`` -- also the argparse ``prog``).
+CLI_PROG = "bet"
 
 COMMAND_HELP = {
     "info": "show framework, python, os and application state",
@@ -463,7 +469,13 @@ def run_validate() -> dict:
 # ── commands ─────────────────────────────────────────────────────
 
 
-def _cmd_info(as_json: bool) -> int:
+def _as_json(args: argparse.Namespace) -> bool:
+    """Return the parsed ``--json`` flag (``False`` when absent)."""
+    return bool(getattr(args, "json", False))
+
+
+def _cmd_info(args: argparse.Namespace) -> int:
+    as_json = _as_json(args)
     application = _ready_application()
     info = Inspector(application).info()
     if as_json:
@@ -481,7 +493,8 @@ def _cmd_info(as_json: bool) -> int:
     return 0
 
 
-def _cmd_environment(as_json: bool) -> int:
+def _cmd_environment(args: argparse.Namespace) -> int:
+    as_json = _as_json(args)
     data = Environment.detect().to_dict()
     if as_json:
         _print_json(data)
@@ -491,7 +504,8 @@ def _cmd_environment(as_json: bool) -> int:
     return 0
 
 
-def _cmd_status(as_json: bool) -> int:
+def _cmd_status(args: argparse.Namespace) -> int:
+    as_json = _as_json(args)
     application = _ready_application()
     status = Inspector(application).status()
     if as_json:
@@ -507,7 +521,8 @@ def _cmd_status(as_json: bool) -> int:
     return 0
 
 
-def _cmd_config(as_json: bool) -> int:
+def _cmd_config(args: argparse.Namespace) -> int:
+    as_json = _as_json(args)
     application = _ready_application()
     data = application.config.safe_data()
     if as_json:
@@ -519,7 +534,8 @@ def _cmd_config(as_json: bool) -> int:
     return 0
 
 
-def _cmd_doctor(as_json: bool) -> int:
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    as_json = _as_json(args)
     application = _ready_application()
     report = Inspector(application).doctor()
     if as_json:
@@ -536,7 +552,8 @@ def _cmd_doctor(as_json: bool) -> int:
     return 0 if report["ok"] else 1
 
 
-def _cmd_validate(as_json: bool) -> int:
+def _cmd_validate(args: argparse.Namespace) -> int:
+    as_json = _as_json(args)
     results = run_validate()
     if as_json:
         _print_json(results)
@@ -554,7 +571,7 @@ def _cmd_validate(as_json: bool) -> int:
     return 0 if results["status"] == "pass" else 1
 
 
-def _cmd_manifest(as_json: bool, write: bool = False) -> int:
+def _cmd_manifest(args: argparse.Namespace) -> int:
     """Show the runtime derived manifest; ``--write`` regenerates the file.
 
     ``.betrayer/manifest.json`` and ``.betrayer/architecture.json`` are never
@@ -562,6 +579,8 @@ def _cmd_manifest(as_json: bool, write: bool = False) -> int:
     package surface, so a metadata file can never drift away from the runtime
     it describes.
     """
+    as_json = _as_json(args)
+    write = bool(getattr(args, "write", False))
     manifest = build_manifest()
     if write:
         written = write_metadata()
@@ -583,49 +602,79 @@ def _cmd_manifest(as_json: bool, write: bool = False) -> int:
     return 0
 
 
-_COMMAND_HANDLERS = {
-    "info": _cmd_info,
-    "environment": _cmd_environment,
-    "status": _cmd_status,
-    "config": _cmd_config,
-    "doctor": _cmd_doctor,
-    "validate": _cmd_validate,
-    "manifest": _cmd_manifest,
-}
+def _configure_manifest(parser: argparse.ArgumentParser) -> None:
+    """Add ``manifest`` specific flags (registered with the command)."""
+    parser.add_argument(
+        "--write",
+        action="store_true",
+        help="regenerate the generated .betrayer metadata from runtime state",
+    )
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build the argparse parser (public so tests can assert the surface)."""
-    parser = argparse.ArgumentParser(prog="betrayer", description=f"{FRAMEWORK_NAME} framework CLI")
+def build_command_registry() -> CommandRegistry:
+    """Build the single CLI dispatch table.
+
+    The registry is the *only* place a command is wired up.  Adding ``create``,
+    ``generate``, ``migrate`` or ``inspect`` later means registering one more
+    :class:`~betrayer.cli.registry.Command` here (or from a dedicated command
+    module); the parser and the dispatch loop stay untouched.
+    """
+    registry = CommandRegistry(CLI_PROG)
+    registry.register(Command("info", COMMAND_HELP["info"], _cmd_info))
+    registry.register(Command("environment", COMMAND_HELP["environment"], _cmd_environment))
+    registry.register(Command("status", COMMAND_HELP["status"], _cmd_status))
+    registry.register(Command("config", COMMAND_HELP["config"], _cmd_config))
+    registry.register(Command("doctor", COMMAND_HELP["doctor"], _cmd_doctor))
+    registry.register(Command("validate", COMMAND_HELP["validate"], _cmd_validate))
+    registry.register(
+        Command("manifest", COMMAND_HELP["manifest"], _cmd_manifest, configure=_configure_manifest)
+    )
+    return registry
+
+
+COMMAND_REGISTRY: CommandRegistry = build_command_registry()
+
+# ``COMMANDS`` stays the canonical, ordered list of command names.  It is
+# derived from the registry so the registry remains the single source of truth.
+COMMANDS = COMMAND_REGISTRY.names()
+
+
+def build_parser(registry: Optional[CommandRegistry] = None) -> argparse.ArgumentParser:
+    """Build the argparse parser (public so tests can assert the surface).
+
+    Subcommands are generated from a :class:`CommandRegistry`; when no registry
+    is passed the shared :data:`COMMAND_REGISTRY` is used.  Neither the parser
+    nor its loop needs to change to add a new command.
+    """
+    active = registry if registry is not None else COMMAND_REGISTRY
+    parser = argparse.ArgumentParser(prog=active.prog, description=f"{FRAMEWORK_NAME} framework CLI")
     parser.add_argument("--version", action="version", version=f"{FRAMEWORK_NAME} {__version__}")
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="emit machine readable JSON output")
     subparsers = parser.add_subparsers(dest="command", metavar="command")
-    for name in COMMANDS:
+    for command in active.commands():
         subparser = subparsers.add_parser(
-            name, parents=[common], help=COMMAND_HELP[name], description=COMMAND_HELP[name]
+            command.name, parents=[common], help=command.help, description=command.help
         )
-        if name == "manifest":
-            subparser.add_argument(
-                "--write", action="store_true", help="regenerate the generated .betrayer metadata from runtime state"
-            )
+        command.add_arguments(subparser)
+        # Bind the resolved Command so dispatch never needs a second lookup table.
+        subparser.set_defaults(_command=command)
     return parser
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(argv: Optional[Sequence[str]] = None, registry: Optional[CommandRegistry] = None) -> int:
     """CLI entry point. Returns a real exit code (0 = success)."""
-    parser = build_parser()
+    parser = build_parser(registry)
     args = parser.parse_args(argv)
-    command = getattr(args, "command", None)
+    command = getattr(args, "_command", None)
     if command is None:
         parser.print_help()
         return 2
-    as_json = bool(getattr(args, "json", False))
     try:
-        handler = _COMMAND_HANDLERS[command]
-        if command == "manifest":
-            return handler(as_json, write=bool(getattr(args, "write", False)))
-        return handler(as_json)
+        return int(command.handler(args))
+    except CommandError as exc:
+        print(f"[FAIL] {exc}", file=sys.stderr)
+        return exc.exit_code
     except BetrayerError as exc:
         print(f"[FAIL] {exc}", file=sys.stderr)
         return 1

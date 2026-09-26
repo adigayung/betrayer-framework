@@ -1,0 +1,14 @@
+=== betrayer\generators\project.py (206 lines) ===
+    22 ClassDef     ProjectGenerator  (lines 22-206, 185 lines)
+    25   .__init__  (lines 25-27, 3 lines)
+    29   .generate  (lines 29-61, 33 lines)
+    63   ._define_project_structure  (lines 63-85, 23 lines)
+    87   ._generate_app_py  (lines 87-106, 20 lines)
+   108   ._generate_test_app_py  (lines 108-120, 13 lines)
+   122   ._generate_readme  (lines 122-144, 23 lines)
+   146   ._generate_gitignore  (lines 146-206, 61 lines)
+  -- imports --
+    from __future__ import annotations
+    from pathlib import Path
+    from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+    from betrayer.generators.base import GeneratorResult, TemplateGenerator

@@ -1,0 +1,58 @@
+{
+    "framework": "Betrayer",
+    "architecture_version": "1.0.0",
+    "foundation_version": "0.1.0",
+    "layers": [
+        {
+            "name": "core",
+            "description": "Foundation subsystems: config, environment, lifecycle, registry, exceptions",
+            "dependencies": []
+        },
+        {
+            "name": "runtime",
+            "description": "Runtime context and state management",
+            "dependencies": [
+                "core"
+            ]
+        },
+        {
+            "name": "diagnostics",
+            "description": "Inspection and validation tools",
+            "dependencies": [
+                "core",
+                "runtime"
+            ]
+        },
+        {
+            "name": "cli",
+            "description": "Command-line interface",
+            "dependencies": [
+                "core",
+                "runtime",
+                "diagnostics"
+            ]
+        },
+        {
+            "name": "ai",
+            "description": "LLM-facing documentation and guidance",
+            "dependencies": [
+                "core",
+                "runtime",
+                "diagnostics"
+            ]
+        }
+    ],
+    "dependency_rules": [
+        "core MUST NOT depend on cli, runtime, diagnostics, or ai",
+        "runtime MUST NOT depend on cli or diagnostics",
+        "diagnostics MUST NOT depend on cli",
+        "cli MUST depend only on core, runtime, and diagnostics",
+        "ai MUST depend only on core, runtime, and diagnostics"
+    ],
+    "extension_points": [
+        "lifecycle handlers (on_bootstrap, on_initialize, on_ready, on_start, on_stop, on_shutdown, on_error)",
+        "Registry for custom components",
+        "Config for typed configuration",
+        "Environment for runtime inspection"
+    ]
+}

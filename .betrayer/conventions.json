@@ -1,0 +1,27 @@
+{
+    "framework": "Betrayer",
+    "conventions": [
+        "All public APIs use type hints",
+        "No circular imports between packages",
+        "core does not depend on cli, runtime, diagnostics, or ai",
+        "runtime does not depend on cli or diagnostics",
+        "diagnostics does not depend on cli",
+        "cli uses only public framework APIs",
+        "tests do not modify framework source",
+        "environment detection does not mutate the environment",
+        "configuration never prints secrets to output",
+        "Lifecycle state machine is deterministic and immutable per transition",
+        "Bootstrap is deterministic and repeatable",
+        "Config is immutable after finalisation",
+        "EnvironmentInfo is frozen (immutable)",
+        "RuntimeContext is not a global singleton",
+        "Exceptions carry code, component, stage, and cause fields",
+        "CLI exit code 0 means success, non-zero means error",
+        "All path handling uses pathlib, not hardcoded slashes",
+        "Windows is a first-class environment, not an afterthought",
+        "Generated metadata (.betrayer/manifest.json, .betrayer/architecture.json) is rebuilt with 'python -m betrayer manifest --write' and is never hand edited",
+        "Every CLI command is registered in COMMANDS, COMMAND_HELP and _COMMAND_HANDLERS in betrayer/cli/main.py",
+        "Validator and doctor report only real measurements or real imports, never guesses",
+        "Each module has one canonical role: api.py (façade), errors.py (exceptions), lifecycle.py (state machine) -> never both in one module"
+    ]
+}

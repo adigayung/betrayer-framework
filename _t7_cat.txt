@@ -1,0 +1,199 @@
+440:        drifted = sorted(key for key, value in expected.items() if stored.get(key) != value)
+441:        checks.append(
+442:            (path.name, not drifted, "matches runtime" if not drifted else f"drifted: {', '.join(drifted)}")
+443:        )
+444:    return _section("metadata", "generated metadata matches runtime", checks)
+445:
+446:
+447:def run_validate() -> dict:
+448:    """Run every foundation validation section and return a report dict."""
+449:    results: dict = {}
+450:    results["imports"] = _validate_imports()
+451:    results["package_structure"] = _validate_package_structure()
+452:    results["lifecycle"] = _validate_lifecycle()
+453:    results["configuration"] = _validate_configuration()
+454:    results["environment"] = _validate_environment()
+455:    results["runtime"] = _validate_runtime()
+456:    results["metadata"] = _validate_metadata()
+457:    results["tests"] = _validate_tests()
+458:    sections = [value for value in results.values() if isinstance(value, dict)]
+459:    results["status"] = "pass" if sections and all(s["status"] == "pass" for s in sections) else "fail"
+460:    return results
+461:
+462:
+463:# ── commands ─────────────────────────────────────────────────────
+464:
+465:
+466:def _cmd_info(as_json: bool) -> int:
+467:    application = _ready_application()
+468:    info = Inspector(application).info()
+469:    if as_json:
+470:        _print_json(info)
+471:        return 0
+472:    print(f"{FRAMEWORK_NAME} Framework")
+473:    print(f"Version: {info['version']}")
+474:    print(f"Architecture: {info['architecture_version']}")
+475:    print(f"Python: {info['python']}")
+476:    print(f"OS: {info['os']}")
+477:    print(f"Environment: {info['environment']}")
+478:    print(f"Project Root: {info['project_root']}")
+479:    print(f"Application: {info['application']}")
+480:    print(f"Application State: {info['state']}")
+481:    return 0
+482:
+483:
+484:def _cmd_environment(as_json: bool) -> int:
+485:    data = Environment.detect().to_dict()
+486:    if as_json:
+487:        _print_json(data)
+488:        return 0
+489:    for key in sorted(data):
+490:        print(f"{key}: {data[key]}")
+491:    return 0
+492:
+493:
+494:def _cmd_status(as_json: bool) -> int:
+495:    application = _ready_application()
+496:    status = Inspector(application).status()
+497:    if as_json:
+498:        _print_json(status)
+499:        return 0
+500:    print(f"Application: {status['application']}")
+501:    print(f"State: {status['state']}")
+502:    print(f"Previous State: {status['previous_state']}")
+503:    print(f"Ready: {status['ready']}")
+504:    print(f"History: {' -> '.join(status['history'])}")
+505:    print(f"Components: {', '.join(status['components']) or '(none)'}")
+506:    print(f"Failed: {status['failed']}")
+507:    return 0
+508:
+509:
+510:def _cmd_config(as_json: bool) -> int:
+511:    application = _ready_application()
+512:    data = application.config.safe_data()
+513:    if as_json:
+514:        _print_json(data)
+515:        return 0
+516:    print("Configuration (secrets masked):")
+517:    for key in sorted(data):
+518:        print(f"{key} = {data[key]}")
+519:    return 0
+520:
+521:
+522:def _cmd_doctor(as_json: bool) -> int:
+523:    application = _ready_application()
+524:    report = Inspector(application).doctor()
+525:    if as_json:
+526:        _print_json(report)
+527:        return 0 if report["ok"] else 1
+528:    for check in report["checks"]:
+529:        if check["status"] == "ok":
+530:            print(f"[OK] {check['name']}")
+531:        else:
+532:            print(f"[FAIL] {check['name']}")
+533:            print(f"Reason: {check.get('reason', 'unknown')}")
+534:            print(f"Suggested check: {check.get('suggestion', 'inspect the component manually')}")
+535:    print("Doctor: " + ("all checks passed" if report["ok"] else "problems detected"))
+536:    return 0 if report["ok"] else 1
+537:
+538:
+539:def _cmd_validate(as_json: bool) -> int:
+540:    results = run_validate()
+541:    if as_json:
+542:        _print_json(results)
+543:        return 0 if results["status"] == "pass" else 1
+544:    for name, section in results.items():
+545:        if not isinstance(section, dict):  # skips the aggregate "status" key
+546:            continue
+547:        marker = "OK" if section["status"] == "pass" else "FAIL"
+548:        print(f"[{marker}] {name}: {section['detail']}")
+549:        if section["status"] == "fail":
+550:            for check in section["checks"]:
+551:                if check["status"] == "fail":
+552:                    print(f"    - {check['name']}: {check['detail']}")
+553:    print(f"Validation: {results['status']}")
+554:    return 0 if results["status"] == "pass" else 1
+555:
+556:
+557:def _cmd_manifest(as_json: bool, write: bool = False) -> int:
+558:    """Show the runtime derived manifest; ``--write`` regenerates the file.
+559:
+560:    ``.betrayer/manifest.json`` and ``.betrayer/architecture.json`` are never
+561:    hand edited: they are rebuilt from ``betrayer.core.meta`` plus the CLI and
+562:    package surface, so a metadata file can never drift away from the runtime
+563:    it describes.
+564:    """
+565:    manifest = build_manifest()
+566:    if write:
+567:        written = write_metadata()
+568:        if as_json:
+569:            _print_json({"written": [str(path) for path in written], "manifest": manifest})
+570:        else:
+571:            for path in written:
+572:                print(f"metadata written: {path}")
+573:        return 0
+574:    if as_json:
+575:        _print_json(manifest)
+576:        return 0
+577:    print(f"{FRAMEWORK_NAME} manifest (generated from runtime)")
+578:    print(f"version: {manifest['version']}")
+579:    print(f"foundation_version: {manifest['foundation_version']}")
+580:    print(f"architecture_version: {manifest['architecture_version']}")
+581:    print(f"commands: {', '.join(manifest['commands'])}")
+582:    print(f"packages: {', '.join(manifest['packages'])}")
+583:    return 0
+584:
+585:
+586:_COMMAND_HANDLERS = {
+587:    "info": _cmd_info,
+588:    "environment": _cmd_environment,
+589:    "status": _cmd_status,
+590:    "config": _cmd_config,
+591:    "doctor": _cmd_doctor,
+592:    "validate": _cmd_validate,
+593:    "manifest": _cmd_manifest,
+594:}
+595:
+596:
+597:def build_parser() -> argparse.ArgumentParser:
+598:    """Build the argparse parser (public so tests can assert the surface)."""
+599:    parser = argparse.ArgumentParser(prog="betrayer", description=f"{FRAMEWORK_NAME} framework CLI")
+600:    parser.add_argument("--version", action="version", version=f"{FRAMEWORK_NAME} {__version__}")
+601:    common = argparse.ArgumentParser(add_help=False)
+602:    common.add_argument("--json", action="store_true", help="emit machine readable JSON output")
+603:    subparsers = parser.add_subparsers(dest="command", metavar="command")
+604:    for name in COMMANDS:
+605:        subparser = subparsers.add_parser(
+606:            name, parents=[common], help=COMMAND_HELP[name], description=COMMAND_HELP[name]
+607:        )
+608:        if name == "manifest":
+609:            subparser.add_argument(
+610:                "--write", action="store_true", help="regenerate the generated .betrayer metadata from runtime state"
+611:            )
+612:    return parser
+613:
+614:
+615:def main(argv: Optional[Sequence[str]] = None) -> int:
+616:    """CLI entry point. Returns a real exit code (0 = success)."""
+617:    parser = build_parser()
+618:    args = parser.parse_args(argv)
+619:    command = getattr(args, "command", None)
+620:    if command is None:
+621:        parser.print_help()
+622:        return 2
+623:    as_json = bool(getattr(args, "json", False))
+624:    try:
+625:        handler = _COMMAND_HANDLERS[command]
+626:        if command == "manifest":
+627:            return handler(as_json, write=bool(getattr(args, "write", False)))
+628:        return handler(as_json)
+629:    except BetrayerError as exc:
+630:        print(f"[FAIL] {exc}", file=sys.stderr)
+631:        return 1
+632:    except Exception as exc:  # noqa: BLE001 - never leak a traceback as the only output
+633:        print(f"[FAIL] unexpected error: {type(exc).__name__}: {exc}", file=sys.stderr)
+634:        return 1
+635:
+636:
+637:if __name__ == "__main__":  # pragma: no cover - module entry point
+638:    raise SystemExit(main())

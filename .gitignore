@@ -1,0 +1,8 @@
+.aether/
+__pycache__/
+.env
+.git/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/

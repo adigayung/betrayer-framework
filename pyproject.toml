@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "betrayer-framework"
+version = "0.1.0"
+description = "LLM-first Python framework for coding agents"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["betrayer*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

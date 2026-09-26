@@ -1,0 +1,19 @@
+    """CLI entry point. Returns a real exit code (0 = success)."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    command = getattr(args, "command", None)
+    if command is None:
+        parser.print_help()
+        return 2
+    as_json = bool(getattr(args, "json", False))
+    try:
+        handler = _COMMAND_HANDLERS[command]
+        if command == "manifest":
+            return handler(as_json, write=bool(getattr(args, "write", False)))
+        return handler(as_json)
+    except BetrayerError as exc:
+        print(f"[FAIL] {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:  # noqa: BLE001 - never leak a traceback as the only output
+        print(f"[FAIL] unexpected error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1

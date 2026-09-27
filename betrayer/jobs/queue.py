@@ -1,6 +1,6 @@
 """Canonical Queue abstraction.
 
-Wraps the existing infrastructure queue backend with a Job-oriented API::
+A self-contained in-memory queue for Job dispatch::
 
     queue = Queue()
     queue.push(MyJob(...))
@@ -11,44 +11,49 @@ Wraps the existing infrastructure queue backend with a Job-oriented API::
 
 from __future__ import annotations
 
+import heapq
+import time
+import uuid
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-import betrayer.infrastructure.queue as _infra_queue
-
-_InMemoryQueue = _infra_queue.InMemoryQueue
-_QueueMessage = _infra_queue.QueueMessage
 from betrayer.jobs.job import Job
+
+
+@dataclass
+class _QueueEntry:
+    """Internal queue message wrapper."""
+
+    id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    payload: Any = None
+    priority: int = 0
+    enqueued_at: float = field(default_factory=time.time)
 
 
 class Queue:
     """Canonical queue for Job dispatch.
 
-    Uses the existing ``betrayer.infrastructure.queue.InMemoryQueue`` as
-    the default in-memory backend.  A different backend can be injected
-    via the ``backend`` parameter (must implement the same interface).
+    Uses an in-memory priority heap as the default backend.
     """
 
     def __init__(self, name: str = "default", backend: Any = None) -> None:
         self.name = name
-        self._backend = backend if backend is not None else _InMemoryQueue(name=name)
+        self._backend = backend if backend is not None else _InMemoryBackend()
+        self._counter = 0
 
     # -- canonical API -------------------------------------------------
 
     def push(self, job: Job, *, priority: int = 0) -> str:
         """Enqueue a Job.  Returns the job ID."""
-        message = _QueueMessage(
-            payload=job,
-            priority=priority,
-        )
-        return self._backend.enqueue(message, priority=priority)
+        entry = _QueueEntry(payload=job, priority=priority)
+        return self._backend.enqueue(entry, priority=priority)
 
     def pop(self) -> Optional[Job]:
         """Dequeue the next available Job, or None when empty."""
-        message = self._backend.dequeue()
-        if message is None:
+        entry = self._backend.dequeue()
+        if entry is None:
             return None
-        self._backend.acknowledge(message.id)
-        return message.payload if isinstance(message.payload, Job) else None
+        return entry.payload if isinstance(entry.payload, Job) else None
 
     def size(self) -> int:
         """Number of jobs currently in the queue."""
@@ -72,6 +77,35 @@ class Queue:
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<Queue name={self.name!r} size={self.size()}>"
+
+
+# ── Internal in-memory backend ────────────────────────────────────────
+
+
+class _InMemoryBackend:
+    """Minimal in-memory priority queue backend."""
+
+    def __init__(self) -> None:
+        self._heap: List[tuple] = []
+        self._counter = 0
+
+    def enqueue(self, entry: _QueueEntry, *, priority: int = 0) -> str:
+        self._counter += 1
+        heapq.heappush(self._heap, (-priority, self._counter, entry.id, entry))
+        return entry.id
+
+    def dequeue(self) -> Optional[_QueueEntry]:
+        while self._heap:
+            _, _, _, entry = heapq.heappop(self._heap)
+            return entry
+        return None
+
+    def size(self) -> int:
+        return len(self._heap)
+
+    def clear(self) -> None:
+        self._heap.clear()
+        self._counter = 0
 
 
 __all__ = ["Queue"]

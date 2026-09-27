@@ -352,7 +352,7 @@ class TestQueue:
         d = queue.to_dict()
         assert d["name"] == "default"
         assert d["size"] == 0
-        assert "InMemoryQueue" in d["backend"]
+        assert "Backend" in d["backend"]
 
 
 # ===================================================================

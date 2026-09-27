@@ -24,6 +24,7 @@
     "packages": [
         "betrayer",
         "betrayer.ai",
+        "betrayer.architecture",
         "betrayer.auth",
         "betrayer.cache",
         "betrayer.cli",

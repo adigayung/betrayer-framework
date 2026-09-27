@@ -1,5 +1,4 @@
-"""Betrayer Infrastructure Layer: HTTP client, email, notification, scheduler,
-background jobs, queue, retry, rate limiter, and health check.
+"""Betrayer Infrastructure Layer: HTTP client, email, notification, retry, and health check.
 
 Dependency direction (enforced by convention)::
 
@@ -9,22 +8,17 @@ Infrastructure Layer depends on **core** (Config, Container, Registry, Lifecycle
 Events, exceptions) but must **not** depend on data, runtime, application,
 bootstrap, cli, or Flask/web layer.
 
-Every public symbol is importable from ``betrayer.infrastructure`` for convenience:
+Note
+----
+Scheduler, background jobs, queue, and rate limiting are now in their
+canonical packages:
 
-.. code-block:: python
+* ``betrayer.jobs``         — jobs, queue, scheduler, runner
+* ``betrayer.ratelimit``    — rate limiting
 
-    from betrayer.infrastructure import (
-        HttpClient,
-        EmailSender,
-        Notification,
-        Notifier,
-        SimpleScheduler,
-        SimpleJobRunner,
-        InMemoryQueue,
-        RetryPolicy,
-        InMemoryRateLimiter,
-        HealthCheckRegistry,
-    )
+These are **not** re-exported from ``betrayer.infrastructure`` to
+avoid duplicate subsystem warnings.  Import them directly from their
+canonical packages instead.
 """
 
 from __future__ import annotations
@@ -53,44 +47,11 @@ from betrayer.infrastructure.notification import (
     LogNotificationBackend,
 )
 
-# Scheduler
-from betrayer.infrastructure.scheduler import (
-    Scheduler,
-    SimpleScheduler,
-    SchedulerConfig,
-    ScheduleTask,
-    ScheduledJob,
-)
-
-# Background jobs
-from betrayer.infrastructure.background_jobs import (
-    JobState,
-    Job,
-    BackgroundJobConfig,
-    JobRunner,
-    SimpleJobRunner,
-)
-
-# Queue
-from betrayer.infrastructure.queue import (
-    QueueBackend,
-    InMemoryQueue,
-    QueueMessage,
-    QueueManager,
-)
-
 # Retry
 from betrayer.infrastructure.retry import (
     RetryPolicy,
     RetryState,
     retry,
-)
-
-# Rate limiter
-from betrayer.infrastructure.rate_limiter import (
-    RateLimiter,
-    InMemoryRateLimiter,
-    RateLimitExceeded,
 )
 
 # Health check
@@ -137,31 +98,10 @@ __all__ = [
     "Notifier",
     "NotificationBackend",
     "LogNotificationBackend",
-    # Scheduler
-    "Scheduler",
-    "SimpleScheduler",
-    "SchedulerConfig",
-    "ScheduleTask",
-    "ScheduledJob",
-    # Background jobs
-    "JobState",
-    "Job",
-    "BackgroundJobConfig",
-    "JobRunner",
-    "SimpleJobRunner",
-    # Queue
-    "QueueBackend",
-    "InMemoryQueue",
-    "QueueMessage",
-    "QueueManager",
     # Retry
     "RetryPolicy",
     "RetryState",
     "retry",
-    # Rate limiter
-    "RateLimiter",
-    "InMemoryRateLimiter",
-    "RateLimitExceeded",
     # Health check
     "HealthCheck",
     "HealthCheckResult",

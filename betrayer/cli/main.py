@@ -465,6 +465,29 @@ def _validate_metadata() -> dict:
     return _section("metadata", "generated metadata matches runtime", checks)
 
 
+def _validate_architecture() -> dict:
+    """Validate architecture rules using the Architecture Guard."""
+    try:
+        from betrayer.architecture import guard
+
+        result = guard.check()
+        checks: list[tuple[str, bool, str]] = []
+        for v in result.violations:
+            label = f"[{v.rule_id}] {v.message} ({v.location})"
+            ok = v.severity != "error"
+            checks.append((label, ok, v.remediation))
+
+        if not checks:
+            checks.append(("architecture_rules", True, "all rules passed"))
+
+        section = _section("architecture", "architecture rules", checks)
+        # Override status: architecture passes only if all rules pass
+        section["status"] = result.status
+        return section
+    except ImportError:
+        return _section("architecture", "architecture rules", [("architecture_guard", False, "betrayer.architecture not available")])
+
+
 def run_validate() -> dict:
     """Run every foundation validation section and return a report dict."""
     results: dict = {}
@@ -476,6 +499,7 @@ def run_validate() -> dict:
     results["runtime"] = _validate_runtime()
     results["metadata"] = _validate_metadata()
     results["tests"] = _validate_tests()
+    results["architecture"] = _validate_architecture()
     sections = [value for value in results.values() if isinstance(value, dict)]
     results["status"] = "pass" if sections and all(s["status"] == "pass" for s in sections) else "fail"
     return results

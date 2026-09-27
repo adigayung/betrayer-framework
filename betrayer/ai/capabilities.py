@@ -744,6 +744,35 @@ CAPABILITIES: list[CapabilityDef] = [
             "        ...",
         ),
     },
+    {
+        "name": "architecture_guard",
+        "purpose": "Canonical architecture enforcement — detects violations that make the framework harder for LLM to understand, maintain, or use.",
+        "description": (
+            "Architecture Guard runs deterministic rules against the Betrayer framework "
+            "to detect dependency direction violations (core→web, infrastructure→web, "
+            "core→AI), duplicate subsystems, circular dependencies, AETHER isolation "
+            "breaches, and Resource boundary violations.  Results are structured JSON "
+            "and integrated into ``bet validate --json``.  Every violation carries a "
+            "rule ID, severity, message, location, and actionable remediation."
+        ),
+        "category": "cli",
+        "status": "stable",
+        "public_api": [
+            "from betrayer.architecture import guard",
+            "guard.check()",
+            "bet validate --json (includes 'architecture' section)",
+        ],
+        "contract": None,
+        "package": "betrayer.architecture",
+        "uses": ["diagnostics", "validation"],
+        "used_by": [],
+        "cli_commands": ["validate"],
+        "example": (
+            "from betrayer.architecture import guard\\n"
+            "result = guard.check()\\n"
+            "print(result.to_dict())\\n"
+        ),
+    },
 ]
 
 

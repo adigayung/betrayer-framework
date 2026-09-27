@@ -49,7 +49,103 @@ betrayer/
     __init__.py
     main.py            # CLI commands
   ai/                  # LLM-facing documentation
+  data/                # Database abstraction + ORM (betrayer.data)
+    engines/           # Concrete engines: SQLiteEngine, DuckDBEngine (09.4)
+  infrastructure/      # HTTP, queue, scheduler, retry, email, health
+  web/                 # Web/REST runtime (WebRouter, ApiResource, FlaskAdapter)
+                       # + validation pipeline (Schema, Field, ValidationResult)
+  generators/          # bet make ... code generators
 ```
+
+## Data Layer & ORM
+
+The Data Layer (`betrayer.data`) provides the database contract (Stage 09.1),
+the Query Builder + ORM (Stage 09.2), and the Repository + Relationships layer
+(Stage 09.3):
+
+```python
+from betrayer.data import ORMModel, ORMField, BaseRepository, HasMany, BelongsTo
+
+class User(ORMModel):
+    __table__ = "users"
+    __connection__ = manager          # DatabaseManager/Engine/provider
+
+    id = ORMField(int, primary_key=True)
+    name = ORMField(str, required=True)
+    posts = HasMany("Post")           # relationship (declared like a field)
+
+user = User.query().where("email", email).first()
+user = User.create(name="John", email="john@example.com")
+user.save()
+user.posts().get()                     # relationship -> Query
+User.repository().find(user.id)        # canonical Repository CRUD
+User.meta()                            # metadata + relationships, no source read
+```
+
+Read `betrayer/data/ORM_CONTRACT.md` for the Query Builder & ORM API
+(define model, query, create/update/delete, transaction, metadata, errors) and
+`betrayer/data/REPOSITORY_CONTRACT.md` for the Repository & relationship API
+(`BaseRepository`, `Model.repository()`, `belongs_to`/`has_one`/`has_many`/
+`many_to_many`, metadata, error contract).
+
+Concrete engines live in `betrayer.data.engines` (Stage 09.4) and are wired in
+through the same registry extension point — the ORM/Repository never know
+which database is behind it:
+
+```python
+from betrayer.core.config import Config
+from betrayer.data import DatabaseRegistry, DatabaseManager
+from betrayer.data.engines import register_builtin_engines
+
+registry = DatabaseRegistry(Config({
+    "database.default.driver": "sqlite",   # or "duckdb"
+    "database.default.database": "app.db",
+}))
+register_builtin_engines(registry)          # sqlite (stdlib) + duckdb (optional)
+manager = DatabaseManager(registry.engine("default"))
+manager.connect()                          # schema -> ORM -> Repository -> DB
+```
+
+`sqlite` uses the standard library; `duckdb` is an optional dependency imported
+lazily (connecting without it raises `UnsupportedDatabaseError`).  See
+`betrayer/data/DATABASE_CONTRACT.md` for config, dialects, and the E2E flow.
+
+## Golden Path (canonical end-to-end)
+
+The canonical application flow, with a runnable example in
+`example/product_catalog/` (see its `README.md` for commands)::
+
+    Project -> Module -> Model -> Migration -> Database
+        -> Repository -> Service -> Resource/API -> Run -> Test -> Debug
+
+Wire it in order (composition root):
+
+```python
+from betrayer import BetrayerApplication, Bootstrap, Config
+from betrayer.data import MigrationRegistry, create_table_sql, install_database
+
+app = BetrayerApplication(name="catalog", config=Config({
+    "database.default.driver": "sqlite",
+    "database.default.database": "catalog.db",
+}))
+Bootstrap(app).build()
+install_database(app)                 # connect + container service "database"
+
+Product.__connection__ = app.container.resolve("database")
+app.modules.register(ProductCatalogModule)   # registers repo + service
+app.modules.initialize_all()
+
+registry = MigrationRegistry()
+registry.register(CreateProductsTableMigration())
+registry.apply(app.container.resolve("database"))   # runs up() by sequence
+```
+
+Wiring helpers (all reuse the existing registry / engines / ORM, no new
+subsystem): `betrayer.data.install_database`, `build_database_manager`,
+`create_table_sql(model, dialect)` / `drop_table_sql` (schema DDL from an ORM
+model), and `MigrationRegistry.apply(database)` / `.rollback(database)`.
+The HTTP layer is the shared `betrayer.web.CrudApiResource` served by
+`FlaskAdapter`; the flow is `HTTP -> Resource -> Service -> Repository -> ORM`.
 
 ## Key Principles
 
@@ -141,6 +237,7 @@ lifecycle, and registry. It is passed to subsystems — not a global singleton.
 | `python -m betrayer validate` | Validate framework integrity     |
 | `python -m betrayer config` | Show configuration (secrets masked)|
 | `python -m betrayer manifest` | Show generated metadata; `--write` regenerates it |
+| `python -m betrayer test`     | Run tests (canonical testing system); `--unit`, `--integration`, `--functional`, `--smoke`, `--json` |
 
 Every command supports `--json` (valid JSON, sorted keys) and returns a real
 exit code: `0` = success, non-zero = failure.
@@ -179,6 +276,31 @@ map to their documented status (`BadRequestError`→400,
 `NotFoundError`→404, `ValidationError`→422, `InternalServerError`→500) and
 unexpected exceptions never leak a traceback.
 
+## Validation & Request Pipeline
+
+The canonical pipeline is `Request → Routing → Request Parsing → Validation →
+Resource → Service → Response/Error`.  Declare a `Schema` (fields + types +
+constraints) and attach it to a resource; the body is parsed once, validated
+*before* the service, and a structured result is put on the `WebContext`:
+
+```python
+from betrayer.web import CrudApiResource, Field, Schema
+
+class ProductSchema(Schema):
+    name  = Field(str, required=True)
+    price = Field(float, required=True, min=0)
+    stock = Field(int, default=0, min=0)
+
+class ProductResource(CrudApiResource):
+    name = "products"
+    schema = ProductSchema()      # POST/PUT validate before the service
+```
+
+A validation failure is a `ValidationError` (422 `VALIDATION_FAILED`) carrying
+`error.details.fields` (`{"name": ["This field is required."]}`).  Dependency
+injection uses the existing container (`context.resolve("<name>_service")`) —
+there is no second DI/validation/error system.  See `betrayer/ai/VALIDATION.md`.
+
 ## Generated Metadata
 
 `.betrayer/manifest.json` and `.betrayer/architecture.json` are GENERATED,
@@ -203,6 +325,32 @@ drifts from the runtime it describes. Source of truth is always code.
    `COMMAND_HELP` and `_COMM
 … [dipadatkan] 300 karakter dipotong …
 
+
+## Testing System
+
+Betrayer provides a canonical testing system built on pytest. See `betrayer/ai/TESTING_CONTRACT.md` for the full contract.
+
+Key commands:
+
+```bash
+bet test              # run all tests (delegates to pytest)
+bet test --unit       # unit tests only
+bet test --integration
+bet test --functional
+bet test --smoke
+bet test --json       # structured JSON output
+```
+
+Test layers (by file naming convention):
+
+| Layer | Pattern |
+|-------|---------|
+| Unit | `test_*_unit.py` |
+| Integration | `test_*_integration.py` |
+| Functional | `test_*_functional.py` |
+| Smoke | `test_*_smoke.py` |
+
+Available fixtures: `application`, `database_path`, `database_config`, `database_manager` (defined in `tests/conftest.py`).
 
 ## What NOT to Do
 

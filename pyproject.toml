@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 
 [project.optional-dependencies]
 dev = ["pytest"]
+duckdb = ["duckdb"]
 
 [tool.setuptools.packages.find]
 include = ["betrayer*"]

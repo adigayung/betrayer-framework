@@ -12,13 +12,15 @@
         "validate",
         "manifest",
         "create",
-        "make"
+        "make",
+        "test"
     ],
     "packages": [
         "betrayer",
         "betrayer.cli",
         "betrayer.core",
         "betrayer.data",
+        "betrayer.data.engines",
         "betrayer.diagnostics",
         "betrayer.generators",
         "betrayer.infrastructure",

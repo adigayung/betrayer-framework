@@ -69,6 +69,22 @@ _ERROR_TO_CODE: Dict[type, str] = {
 # ---------------------------------------------------------------------------
 
 
+def _error_details(error: BaseException) -> Any:
+    """Best-effort structured ``details`` for an error (validation payload...).
+
+    Only errors that expose a ``details()`` method (such as
+    :class:`~betrayer.web.exceptions.ValidationError`) contribute; anything
+    else returns ``None`` so the wire payload never grows unexpectedly.
+    """
+    details_fn = getattr(error, "details", None)
+    if not callable(details_fn):
+        return None
+    try:
+        return details_fn()
+    except Exception:  # noqa: BLE001 - details are best-effort only
+        return None
+
+
 def web_error_to_response(error: WebError, *, details: Any = None) -> Response:
     """Convert a :class:`WebError` into a :class:`Response`.
 
@@ -127,6 +143,7 @@ def register_web_error_handlers(app: "Flask") -> None:
                     message=message,
                     status=status,
                     code=code,
+                    details=_error_details(error),
                 ).to_flask()
 
             handler.__name__ = f"_handle_{_cls.__name__}"  # type: ignore[attr-defined]

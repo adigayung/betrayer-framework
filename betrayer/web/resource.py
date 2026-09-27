@@ -35,6 +35,7 @@ from betrayer.web.context import WebContext
 from betrayer.web.request import Request
 from betrayer.web.response import ApiResponse, Response
 from betrayer.web.routing import Route, WebRouteRegistry, WebRouter
+from betrayer.web.validation import Schema, ValidationResult, validate as _validate
 
 __all__ = [
     "ApiResource",
@@ -96,6 +97,12 @@ class ApiResource:
     #: Declarative ``(method, path, handler)`` triples.  Pass ``None`` and
     #: override :meth:`endpoints` for the explicit form.
     routes: Tuple[Tuple[str, str, Callable[..., Any]], ...] = ()
+
+    #: Optional request validation schema (a
+    #: :class:`~betrayer.web.validation.Schema` instance, a ``Schema``
+    #: subclass, or a raw field mapping).  When set, the CRUD handlers parse
+    #: the JSON body once and validate it *before* calling the service.
+    schema: Any = None
 
     def __init__(
         self,
@@ -172,6 +179,70 @@ class ApiResource:
         if self.service is not None:
             return self.service
         return context.resolve(self.service_key)
+
+    # -- request validation pipeline (Task 11) ------------------------
+    def request_schema(self) -> Any:
+        """Return the resolved validation ``Schema`` (or ``None``).
+
+        ``self.schema`` (or a ``schema_key`` service on the container) may be a
+        :class:`~betrayer.web.validation.Schema` instance, a ``Schema``
+        subclass or a raw field mapping; it is normalised here so handlers
+        never branch on its shape.
+        """
+        raw = self.schema
+        if raw is None:
+            return None
+        if isinstance(raw, Schema):
+            return raw
+        if isinstance(raw, type) and issubclass(raw, Schema):
+            return raw()
+        if isinstance(raw, dict):
+            return Schema(raw)
+        from betrayer.web.exceptions import WebAdapterError
+
+        raise WebAdapterError(
+            message=(
+                "Resource.schema must be a Schema, a Schema subclass or a field "
+                f"mapping, got {type(raw).__name__}"
+            ),
+            code="RESOURCE_SCHEMA_INVALID",
+            context={"resource": self.name},
+        )
+
+    def validate_request(
+        self,
+        request: Request,
+        context: Optional[WebContext] = None,
+        *,
+        partial: bool = False,
+    ) -> ValidationResult:
+        """Parse the body once, validate it, return the structured result.
+
+        The JSON body is read through :meth:`json_body` (memoised, so parsing
+        happens exactly once).  When a :attr:`schema` is declared the body is
+        validated against it; the :class:`ValidationResult` is attached to the
+        ``WebContext`` (``context.validation``) so the Service can read it too.
+
+        An invalid body raises the framework ``ValidationError`` (422
+        ``VALIDATION_FAILED``) carrying the structured field errors, so the
+        service is never called.
+        """
+        body = self.json_body(request)
+        result = _validate(self.request_schema(), body, partial=partial)
+        if context is not None:
+            context.set_validation(result)
+        result.raise_if_invalid()
+        return result
+
+    def validated_body(
+        self,
+        request: Request,
+        context: Optional[WebContext] = None,
+        *,
+        partial: bool = False,
+    ) -> dict:
+        """Validated, cleaned payload ready to hand to the service."""
+        return self.validate_request(request, context, partial=partial).data
 
     # -- request/response helpers (thin, no business logic) -----------
     @staticmethod
@@ -316,9 +387,9 @@ class CrudApiResource(ApiResource):
         return ApiResponse.success(data=_dumps(item))
 
     async def create_handler(self, request: Request, context: WebContext) -> Response:
-        """POST {base} -- create an item through the service."""
+        """POST {base} -- validate then create an item through the service."""
         service = self.resolve_service(context)
-        body = self.json_body(request)
+        body = self.validated_body(request, context)
         item = service.create(**body)
         return ApiResponse.success(
             data=_dumps(item),
@@ -327,10 +398,10 @@ class CrudApiResource(ApiResource):
         )
 
     async def update_handler(self, request: Request, context: WebContext) -> Response:
-        """PUT {base}/<id> -- update an item through the service."""
+        """PUT {base}/<id> -- validate (partial) then update through the service."""
         service = self.resolve_service(context)
         identifier = request.param("id")
-        body = self.json_body(request)
+        body = self.validated_body(request, context, partial=True)
         item = service.update(identifier, **body)
         if item is None:
             self.not_found(f"{self.name} not found")

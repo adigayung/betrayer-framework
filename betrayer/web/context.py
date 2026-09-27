@@ -56,6 +56,29 @@ class WebContext:
         self.request = request
         self.route = route
         self.module = module
+        #: The structured request validation result (a
+        #: :class:`~betrayer.web.validation.ValidationResult`), set by the
+        #: resource pipeline once the body has been parsed + validated.  Both
+        #: the Resource and the Service can read the same structure here.
+        self.validation: Any = None
+
+    # -- request validation (Task 11 pipeline) ------------------------
+    def set_validation(self, result: Any) -> Any:
+        """Attach the validated request result; returns it unchanged."""
+        self.validation = result
+        return result
+
+    @property
+    def validated(self) -> Any:
+        """The :class:`ValidationResult` for this request (``None`` if unset)."""
+        return self.validation
+
+    @property
+    def validated_data(self) -> Optional[dict]:
+        """The cleaned/validated request payload, or ``None`` when unset."""
+        if self.validation is None:
+            return None
+        return getattr(self.validation, "data", None)
 
     # -- framework services ------------------------------------------
     @property

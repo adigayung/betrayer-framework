@@ -163,6 +163,32 @@ class MigrationRegistry:
         self._migrations.clear()
         self._by_sequence.clear()
 
+    # ── Execution ───────────────────────────────────────────────────────
+
+    def apply(self, database: DatabaseManager) -> List[str]:
+        """Run every migration's ``up`` in ``sequence`` order.
+
+        Returns the names of the applied migrations, in the order they ran.
+        An exception from a migration propagates unchanged so a failure is
+        attributed to the exact migration (deterministic, never swallowed).
+        """
+        applied: List[str] = []
+        for migration in self.ordered():
+            migration.up(database)
+            applied.append(migration.name)
+        return applied
+
+    def rollback(self, database: DatabaseManager) -> List[str]:
+        """Run every migration's ``down`` in reverse ``sequence`` order.
+
+        Returns the names of the rolled back migrations, in the order they ran.
+        """
+        rolled_back: List[str] = []
+        for migration in reversed(self.ordered()):
+            migration.down(database)
+            rolled_back.append(migration.name)
+        return rolled_back
+
     # ── Introspection ───────────────────────────────────────────────────
 
     def introspect(self) -> Dict[str, Any]:
@@ -177,7 +203,52 @@ class MigrationRegistry:
         return f"MigrationRegistry(count={self.count()})"
 
 
+def create_table_sql(model: Any, dialect: Any, *, if_not_exists: bool = True) -> str:
+    """Return a ``CREATE TABLE`` statement for an ORM model and dialect.
+
+    ``model`` is an :class:`~betrayer.data.orm.ORMModel` subclass; the column
+    list is derived from the model's declared fields and every type/identifier
+    is delegated to ``dialect`` (the :class:`~betrayer.data.database.SQLDialect`
+    of the target engine), so the same call works for any database.  The
+    statement is idempotent by default (``IF NOT EXISTS``), which keeps a
+    migration re-runnable.
+
+    This is the canonical way to write a schema migration without hand-writing
+    SQL or branching on a specific database::
+
+        def up(self, database):
+            database.execute(create_table_sql(Product, database.dialect))
+    """
+    quote = dialect.quote_identifier
+    columns: List[str] = []
+    for name, field in model.orm_fields().items():
+        declaration = dialect.type_name(field.type_)
+        if field.primary_key:
+            declaration += " PRIMARY KEY"
+        elif not field.nullable:
+            declaration += " NOT NULL"
+        columns.append(f"{quote(name)} {declaration}")
+    table = quote(model.table_name())
+    prefix = "IF NOT EXISTS " if if_not_exists else ""
+    return f"CREATE TABLE {prefix}{table} (" + ", ".join(columns) + ")"
+
+
+def drop_table_sql(model: Any, dialect: Any, *, if_exists: bool = True) -> str:
+    """Return a ``DROP TABLE`` statement for an ORM model and dialect.
+
+    The counterpart of :func:`create_table_sql` for a migration ``down``::
+
+        def down(self, database):
+            database.execute(drop_table_sql(Product, database.dialect))
+    """
+    quote = dialect.quote_identifier
+    prefix = "IF EXISTS " if if_exists else ""
+    return f"DROP TABLE {prefix}{quote(model.table_name())}"
+
+
 __all__ = [
     "Migration",
     "MigrationRegistry",
+    "create_table_sql",
+    "drop_table_sql",
 ]

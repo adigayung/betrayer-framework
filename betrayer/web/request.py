@@ -43,6 +43,9 @@ class Request:
         self._raw = raw
         self.path_params: Dict[str, Any] = dict(path_params or {})
         self.route = route
+        #: Memoised JSON body.  ``get_json`` parses at most once per request,
+        #: so the validation pipeline never re-parses the body.
+        self._json_cache: Any = _MISSING
 
     # -- construction -------------------------------------------------
     @classmethod
@@ -197,12 +200,19 @@ class Request:
         return self.get_json()
 
     def get_json(self, default: Any = None) -> Any:
-        """Parsed JSON body with an explicit fallback (never raises)."""
-        raw = self._flask_request()
-        try:
-            value = raw.get_json(silent=True)
-        except Exception:  # noqa: BLE001 - defensive: JSON parsing must not 500
-            return default
+        """Parsed JSON body with an explicit fallback (never raises).
+
+        The body is parsed at most **once** per request: the result is
+        memoised on this ``Request`` instance, so callers (the validation
+        pipeline, handlers, ...) share one parse and never re-read the stream.
+        """
+        if self._json_cache is _MISSING:
+            raw = self._flask_request()
+            try:
+                self._json_cache = raw.get_json(silent=True)
+            except Exception:  # noqa: BLE001 - defensive: JSON parsing must not 500
+                self._json_cache = None
+        value = self._json_cache
         return default if value is None else value
 
     @property

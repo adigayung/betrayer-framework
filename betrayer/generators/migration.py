@@ -1,6 +1,6 @@
 """Migration generator for the Betrayer Framework.
 
-Creates a new database migration file inside an existing BetLayer project.  A
+Creates a new database migration file inside an existing Betrayer project.  A
 migration is a single, ordered, reversible schema/data change following the
 framework's :class:`betrayer.data.migration.Migration` contract: a class with
 a unique ``name``, a deterministic ``sequence`` number and ``up()`` / ``down()``

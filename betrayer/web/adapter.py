@@ -317,6 +317,11 @@ class FlaskAdapter:
         ``WebError`` subclasses keep their status/code/message; anything else
         is classified through the framework bridge so no internals ever leak
         (a raw ``RuntimeError`` becomes a safe 500 with a generic message).
+
+        Validation errors also carry their structured field errors: they are
+        forwarded untouched under ``error.details`` (see
+        :meth:`betrayer.web.exceptions.ValidationError.details`), so the error
+        contract stays the single framework envelope.
         """
         from betrayer.web.flask_bridge import FlaskErrorBridge
         from betrayer.web.response import ApiResponse
@@ -331,10 +336,18 @@ class FlaskAdapter:
             else:
                 code = classified.get("code", "INTERNAL_SERVER_ERROR")
                 message = classified.get("message", "Internal server error")
+            details = None
+            details_fn = getattr(error, "details", None)
+            if callable(details_fn):
+                try:
+                    details = details_fn()
+                except Exception:  # noqa: BLE001 - details are best-effort only
+                    details = None
             return ApiResponse.error(
                 message=message,
                 status=status,
                 code=code,
+                details=details,
             ).to_flask()
         except Exception:  # pragma: no cover - defensive double failure
             return ApiResponse.error(

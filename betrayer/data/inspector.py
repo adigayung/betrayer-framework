@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from betrayer.data.database import DatabaseManager
+from betrayer.data.registry import DatabaseRegistry
 from betrayer.data.models import Model
 from betrayer.data.repository import Repository
 from betrayer.data.migration import MigrationRegistry
@@ -34,11 +35,13 @@ class DataInspector:
     def __init__(
         self,
         db_manager: Optional[DatabaseManager] = None,
+        db_registry: Optional[DatabaseRegistry] = None,
         migration_registry: Optional[MigrationRegistry] = None,
         cache_manager: Optional[CacheManager] = None,
         storage_manager: Optional[StorageManager] = None,
     ) -> None:
         self._db_manager = db_manager
+        self._db_registry = db_registry
         self._migration_registry = migration_registry
         self._cache_manager = cache_manager
         self._storage_manager = storage_manager
@@ -54,8 +57,10 @@ class DataInspector:
         self._repositories[name] = repo
 
     def to_dict(self) -> Dict[str, Any]:
-        """Return a deterministic, machine-readable metadata dictionary."""
-        db_info = None
+        """Return deterministic, machine-readable metadata dictionary."""
+        db_info = {}
+        if self._db_registry is not None:
+            db_info["registry"] = self._db_registry.introspect()
         if self._db_manager is not None:
             raw = self._db_manager.to_dict()
             # mask connection secrets
@@ -65,7 +70,8 @@ class DataInspector:
                     if secret_key in meta:
                         meta[secret_key] = "****"
                 raw["metadata"] = meta
-            db_info = raw
+            db_info["manager"] = raw
+        db_summary = db_info or None
 
         models_info = {}
         for name, cls in self._models.items():
@@ -135,8 +141,17 @@ class DataInspector:
         """Human-readable one-line summary."""
         parts = []
         d = self.to_dict()
-        if d.get("database"):
-            parts.append(f"database:{d['database'].get('engine','?')}")
+        db_info = d.get("database") or {}
+        if "manager" in db_info:
+            parts.append(f"database:{db_info['manager'].get('engine', '?')}")
+        elif "registry" in db_info:
+            connections = db_info["registry"].get("connections", {})
+            parts.append(
+                "database_registry:"
+                + ",".join(sorted(connections))
+                if connections
+                else "database_registry:0"
+            )
         if d.get("models"):
             parts.append(f"models:{len(d['models'])}")
         if d.get("repositories"):

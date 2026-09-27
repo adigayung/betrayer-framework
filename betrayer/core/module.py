@@ -156,7 +156,11 @@ class ModuleRegistry:
             )
         self._modules[name] = module
         self._states[name] = ModuleState.REGISTERED
-        self._call_hook(module, "register", self._validate_dependencies(module))
+        # Validate declared dependencies for their side effect (unknown /
+        # self dependency raises here); the *hook context* must be the runtime
+        # context, never the module itself, so ``context.container`` works.
+        self._validate_dependencies(module)
+        self._call_hook(module, "register", None)
         return module
 
     def _validate_dependencies(self, module: Module) -> Module:

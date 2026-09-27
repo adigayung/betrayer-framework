@@ -28,7 +28,7 @@ core) lives in :mod:`betrayer.web.errors`.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 from betrayer.core.exceptions import BetrayerError
 
@@ -162,7 +162,16 @@ class ConflictError(WebError):
 
 
 class ValidationError(WebError):
-    """Input failed validation; ``errors`` lists the rejected fields."""
+    """Input failed validation; ``errors`` / ``fields`` list the rejected fields.
+
+    Two structured views ride along in ``context`` and reach the wire under
+    ``error.details`` (see :mod:`betrayer.web.errors`):
+
+    * ``errors`` -- a list, e.g. ``[{"field": "name", "code": "required",
+      "message": "This field is required."}]``;
+    * ``fields`` -- a ``{field: [message, ...]}`` mapping, the quick view an
+      LLM/client needs to render per-field errors.
+    """
 
     code = "VALIDATION_FAILED"
     http_status = 422
@@ -172,12 +181,36 @@ class ValidationError(WebError):
         message: str = "Validation failed",
         *,
         errors: Optional[Sequence[Any]] = None,
+        fields: Optional[Mapping[str, Sequence[Any]]] = None,
         **kwargs: Any,
     ) -> None:
         context = dict(kwargs.pop("context", None) or {})
         if errors is not None:
             context["errors"] = list(errors)
+        if fields is not None:
+            context["fields"] = {
+                str(name): list(messages) for name, messages in fields.items()
+            }
         super().__init__(message, context=context, **kwargs)
+
+    @property
+    def errors(self) -> list:
+        """The structured field error list (empty when none were attached)."""
+        return list(self.context.get("errors", []))
+
+    @property
+    def fields(self) -> dict:
+        """The ``{field: [message, ...]}`` view (empty when none)."""
+        return dict(self.context.get("fields", {}))
+
+    def details(self) -> Optional[dict]:
+        """The ``details`` payload for the API error envelope (or ``None``)."""
+        payload: dict = {}
+        if self.fields:
+            payload["fields"] = self.fields
+        if self.errors:
+            payload["errors"] = self.errors
+        return payload or None
 
 
 class InternalServerError(WebError):

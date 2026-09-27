@@ -56,8 +56,9 @@ COMMAND_HELP = {
     "doctor": "run foundation health checks",
     "validate": "validate the foundation (imports, structure, lifecycle, ...)",
         "manifest": "show or regenerate the machine readable framework manifest",
-        "create": "create a new BetLayer application project",
+        "create": "create a new Betrayer application project",
         "make": "generate project artifacts (e.g. a new module or resource)",
+        "test": "run tests (canonical testing system)",
     }
 
 REQUIRED_MODULES = (
@@ -605,7 +606,7 @@ def _cmd_manifest(args: argparse.Namespace) -> int:
 
 
 def _cmd_create(args: argparse.Namespace) -> int:
-    """Create a new BetLayer application project in the current directory.
+    """Create a new Betrayer application project in the current directory.
 
     ``create`` is the one command that does not build a READY application
     first: it generates a project on disk, so there is no application to
@@ -640,7 +641,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             }
         )
         return 0
-    print(f"Created BetLayer project: {generator.target}")
+    print(f"Created Betrayer project: {generator.target}")
     for relative in output.created:
         print(f"  created {relative}")
     print("Run it with:")
@@ -1099,6 +1100,216 @@ def _configure_manifest(parser: argparse.ArgumentParser) -> None:
     )
 
 
+# ── test command ────────────────────────────────────────────────────
+
+_TEST_LAYERS = {
+    "unit": "unit tests (test_*_unit.py, tests/unit/)",
+    "integration": "integration tests (test_*_integration.py, tests/integration/)",
+    "functional": "functional/API tests (test_*_functional.py, tests/functional/)",
+    "smoke": "smoke tests (test_*_smoke.py, tests/smoke/)",
+}
+
+_TEST_FILE_PATTERNS = {
+    "unit": ("test_*_unit.py", "unit/"),
+    "integration": ("test_*_integration.py", "integration/"),
+    "functional": ("test_*_functional.py", "functional/"),
+    "smoke": ("test_*_smoke.py", "smoke/"),
+}
+
+
+def _cmd_test(args: argparse.Namespace) -> int:
+    """Run tests with pytest and produce LLM-friendly output.
+
+    Delegates to ``pytest`` under the hood; never reimplements a test runner.
+    """
+    as_json = _as_json(args)
+
+    # Build pytest arguments.
+    pytest_args: list[str] = []
+
+    # Filter by layer if provided.
+    provided_layers = [
+        layer for layer in _TEST_LAYERS if getattr(args, layer, False)
+    ]
+    paths = getattr(args, "test_paths", ["tests"])
+
+    # Determine test paths/patterns.
+    if paths != ["tests"]:
+        pytest_args.extend(str(p) for p in paths)
+    elif provided_layers:
+        # Collect keyword expressions and paths per layer.
+        k_exprs: list[str] = []
+        for layer in provided_layers:
+            pattern, dir_pattern = _TEST_FILE_PATTERNS[layer]
+            # Use -k to filter by file pattern (pytest doesn't have layer tags)
+            # We use a simple heuristic: match test files by their name pattern.
+            # Since we control the test file naming convention, we can use
+            # the convention directly with --ignore for other layers.
+            pass
+
+        # Better approach: run all tests but filter with -k for layer-specific.
+        # But pytest -k filters on test names, not file names.
+        # The simplest reliable approach: use path with glob patterns via
+        # specific test file discovery.
+
+        # For each layer, collect matching test files.
+        test_files: list[str] = []
+        from pathlib import Path as _Path
+
+        project_root = _Path(__file__).resolve().parents[2]
+        tests_dir = project_root / "tests"
+
+        for layer in provided_layers:
+            pattern, _dir_pattern = _TEST_FILE_PATTERNS[layer]
+            for tf in sorted(tests_dir.glob(pattern)):
+                test_files.append(str(tf))
+
+        if not test_files:
+            if as_json:
+                _print_json(_empty_test_result("no tests found for layer"))
+                return 0
+            print("No tests found for the requested layer.")
+            return 0
+
+        pytest_args.extend(test_files)
+    else:
+        # No filter: run all tests in tests/.
+        pytest_args.extend(str(p) for p in paths)
+
+    # Add pytest options: verbose, no-header, no-summary for LLM-friendly parsing.
+    pytest_args.extend(["-v", "--tb=short", "--no-header", "--no-summary"])
+
+    # Capture output.
+    import io
+    import sys as _sys
+    from unittest import runner as _runner
+
+    # Use pytest's own capture mechanism.
+    import pytest as _pytest
+
+    # We use pytest.main with a custom plugin to capture results.
+    collected_results: list[dict] = []
+    start_time = __import__("time").time()
+
+    class _ResultCollector:
+        """Minimal pytest plugin that collects structured results."""
+
+        def __init__(self) -> None:
+            self.passed: list[dict] = []
+            self.failed: list[dict] = []
+            self.skipped: list[dict] = []
+
+        @staticmethod
+        def pytest_report_header() -> list[str]:
+            return []
+
+        def pytest_runtest_logreport(self, report: Any) -> None:
+            if report.when != "call" and (
+                report.when != "setup" or report.failed
+            ):
+                return
+            node_id = report.nodeid
+            # Skip non-test items.
+            if "::" not in node_id:
+                return
+            parts = node_id.split("::")
+            test_name = parts[-1]
+            test_file = parts[0] if len(parts) > 1 else node_id
+
+            entry = {
+                "test": test_name,
+                "file": test_file,
+                "line": report.location[1] + 1 if report.location else 0,
+            }
+
+            if report.passed and report.when == "call":
+                entry["message"] = "passed"
+                self.passed.append(entry)
+            elif report.skipped:
+                entry["message"] = report.longreprtext if report.longreprtext else "skipped"
+                self.skipped.append(entry)
+            elif report.failed:
+                # Extract short message.
+                msg = str(report.longreprtext) if report.longreprtext else "unknown"
+                # Truncate to first meaningful line.
+                msg = msg.split("\n")[0] if "\n" in msg else msg
+                entry["message"] = msg
+                self.failed.append(entry)
+
+    collector = _ResultCollector()
+    exit_code = _pytest.main(
+        pytest_args,
+        plugins=[collector],
+    )
+    duration = __import__("time").time() - start_time
+
+    # Build structured result.
+    passed = len(collector.passed)
+    failed = len(collector.failed)
+    skipped = len(collector.skipped)
+    total = passed + failed + skipped
+
+    result = {
+        "success": exit_code == 0,
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+        "duration": round(duration, 3),
+        "failures": collector.failed,
+    }
+
+    if as_json:
+        _print_json(result)
+        return 0 if result["success"] else 1
+
+    # LLM-friendly text output.
+    print(f"TEST_RESULT: {'PASS' if result['success'] else 'FAIL'}")
+    print(f"total: {total}  passed: {passed}  failed: {failed}  skipped: {skipped}")
+    print(f"duration: {duration:.3f}s")
+    for failure in collector.failed:
+        print()
+        print("TEST_FAILED")
+        print(f"test: {failure['test']}")
+        print(f"file: {failure['file']}")
+        print(f"line: {failure['line']}")
+        print(f"message: {failure['message']}")
+
+    return 0 if result["success"] else 1
+
+
+def _empty_test_result(reason: str) -> dict:
+    return {
+        "success": True,
+        "total": 0,
+        "passed": 0,
+        "failed": 0,
+        "skipped": 0,
+        "duration": 0.0,
+        "failures": [],
+        "note": reason,
+    }
+
+
+def _configure_test(parser: argparse.ArgumentParser) -> None:
+    """Add ``test`` specific arguments (registered with the command)."""
+    # Optional paths (defaults to "tests" directory).
+    parser.add_argument(
+        "test_paths",
+        nargs="*",
+        default=["tests"],
+        help="test path(s) (file or directory, default: tests/)",
+    )
+    # Layer filters (mutually exclusive-ish; last wins in argparse).
+    for layer, help_text in _TEST_LAYERS.items():
+        flag = f"--{layer}"
+        parser.add_argument(
+            flag,
+            action="store_true",
+            help=help_text,
+        )
+
+
 def build_command_registry() -> CommandRegistry:
     """Build the single CLI dispatch table.
 
@@ -1122,6 +1333,9 @@ def build_command_registry() -> CommandRegistry:
     )
     registry.register(
         Command("make", COMMAND_HELP["make"], _cmd_make, configure=_configure_make)
+    )
+    registry.register(
+        Command("test", COMMAND_HELP["test"], _cmd_test, configure=_configure_test)
     )
     return registry
 

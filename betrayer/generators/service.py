@@ -1,6 +1,6 @@
 """Service generator for the Betrayer Framework.
 
-Creates a new application service inside an existing BetLayer project.  A
+Creates a new application service inside an existing Betrayer project.  A
 service is a plain business-logic class that is registered in the framework's
 dependency injection container (:class:`betrayer.core.container.Container`)
 under a stable, LLM readable name (``<name>_service``).
@@ -211,7 +211,7 @@ __all__ = ["{module_cls}"]
 
 
 class {module_cls}(Module):
-    """BetLayer module for the ``{self.service_name}`` service.
+    """Betrayer module for the ``{self.service_name}`` service.
 
     Registers the service on the application container.
     """

@@ -163,6 +163,13 @@ class RateLimitError(InfrastructureError):
         self.retry_after = retry_after
 
 
+class RetryableError(InfrastructureError):
+    """Error that can be retried automatically."""
+
+    code = "RETRYABLE_ERROR"
+    component = "infrastructure.retry"
+
+
 class HealthCheckError(InfrastructureError):
     """Raised when a health check probe fails."""
 
@@ -183,6 +190,7 @@ __all__ = [
     "BackgroundJobError",
     "QueueError",
     "RetryError",
+    "RetryableError",
     "RateLimitError",
     "HealthCheckError",
 ]

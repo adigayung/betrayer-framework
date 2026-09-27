@@ -41,6 +41,7 @@ __all__ = [
     "NotFoundError",
     "MethodNotAllowedError",
     "ConflictError",
+    "TooManyRequestsError",
     "ValidationError",
     "InternalServerError",
     "RouteError",
@@ -59,6 +60,7 @@ HTTP_STATUS_CODES: Dict[int, str] = {
     405: "METHOD_NOT_ALLOWED",
     409: "CONFLICT",
     422: "VALIDATION_FAILED",
+    429: "RATE_LIMIT_EXCEEDED",
     500: "INTERNAL_ERROR",
 }
 
@@ -211,6 +213,18 @@ class ValidationError(WebError):
         if self.errors:
             payload["errors"] = self.errors
         return payload or None
+
+
+class TooManyRequestsError(WebError):
+    """Rate limit exceeded (429).
+
+    Raised by the rate limiting middleware when a request exceeds the
+    configured limit.  The response carries ``Retry-After`` and the standard
+    rate limit headers.
+    """
+
+    code = "RATE_LIMIT_EXCEEDED"
+    http_status = 429
 
 
 class InternalServerError(WebError):

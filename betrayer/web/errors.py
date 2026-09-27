@@ -26,6 +26,7 @@ from betrayer.web.exceptions import (
     InternalServerError,
     MethodNotAllowedError,
     NotFoundError,
+    TooManyRequestsError,
     UnauthorizedError,
     ValidationError,
     WebError,
@@ -49,6 +50,7 @@ _ERROR_TO_STATUS: Dict[type, int] = {
     MethodNotAllowedError: 405,
     ConflictError: 409,
     ValidationError: 422,
+    TooManyRequestsError: 429,
     InternalServerError: 500,
 }
 
@@ -60,6 +62,7 @@ _ERROR_TO_CODE: Dict[type, str] = {
     MethodNotAllowedError: "METHOD_NOT_ALLOWED",
     ConflictError: "CONFLICT",
     ValidationError: "VALIDATION_FAILED",
+    TooManyRequestsError: "RATE_LIMIT_EXCEEDED",
     InternalServerError: "INTERNAL_SERVER_ERROR",
 }
 

@@ -26,6 +26,7 @@ from betrayer.core.config import Config
 from betrayer.core.environment import Environment
 from betrayer.core.exceptions import BootstrapError, BetrayerError
 from betrayer.core.lifecycle import LifecycleState
+from betrayer.diagnostics.store import DiagnosticsStore
 
 __all__ = ["Bootstrap"]
 
@@ -202,6 +203,16 @@ class Bootstrap:
     def _stage_runtime(self, app: BetrayerApplication) -> str:
         ctx = app.runtime_context
         status = ctx.status()
+        # Attach the canonical diagnostics store (one per application).
+        root = str(app.environment.project_root)
+        app.diagnostics = DiagnosticsStore(name=f"{app.name}.diagnostics")
+        app.diagnostics.record(
+            code="BOOTSTRAP_COMPLETE",
+            component="bootstrap",
+            level="info",
+            message=f"Application {app.name} bootstrapped",
+            context={"state": status.get("lifecycle_state")},
+        )
         return f"context bound to {status['application']} | state={status['lifecycle_state']}"
 
     def _stage_application(self, app: BetrayerApplication) -> str:

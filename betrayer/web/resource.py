@@ -29,9 +29,17 @@ Resources stay thin: they resolve a service through ``WebContext.resolve()``
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
+from betrayer.auth.authorization import authorize
 from betrayer.web.context import WebContext
+from betrayer.web.pagination import (
+    PaginatedResult,
+    PaginationMetadata,
+    PaginationParams,
+    paginate_sequence,
+    parse_pagination,
+)
 from betrayer.web.request import Request
 from betrayer.web.response import ApiResponse, Response
 from betrayer.web.routing import Route, WebRouteRegistry, WebRouter
@@ -53,11 +61,65 @@ def _dumps(item: Any) -> Any:
     return item
 
 
-def _collection_response(items: Sequence[Any], *, resource: str) -> Response:
+def _collection_response(
+    items: Sequence[Any],
+    *,
+    resource: str,
+    pagination: Optional[PaginationMetadata] = None,
+) -> Response:
     payload = [_dumps(item) for item in items]
-    return ApiResponse.success(
-        data=payload,
-        meta={"resource": resource, "count": len(payload)},
+    meta: Dict[str, Any] = {"resource": resource, "count": len(payload)}
+    if pagination is not None:
+        meta["pagination"] = pagination.to_dict()
+    return ApiResponse.success(data=payload, meta=meta)
+
+
+def _coerce_paginated(raw: Any, params: PaginationParams) -> PaginatedResult:
+    """Normalise a ``service.paginate()`` result into a ``PaginatedResult``.
+
+    Accepted shapes:
+
+    * a :class:`~betrayer.web.pagination.PaginatedResult` (canonical);
+    * a ``(items, total)`` pair (``items`` a sequence, ``total`` an int);
+    * a mapping with ``items``/``data`` and an optional ``total``.
+
+    Anything else raises a structured ``TypeError`` so misuse is caught
+    early instead of producing a broken envelope at runtime.
+    """
+    from betrayer.web.exceptions import WebAdapterError
+
+    if isinstance(raw, PaginatedResult):
+        return raw
+    if isinstance(raw, tuple) and len(raw) == 2:
+        items, total = raw
+        return PaginatedResult(
+            items=items,
+            metadata=PaginationMetadata.from_params(params, int(total)),
+        )
+    if isinstance(raw, dict):
+        items = raw.get("items", raw.get("data"))
+        if items is None:
+            raise WebAdapterError(
+                message=(
+                    "service.paginate() mapping must carry 'items' or 'data'"
+                ),
+                code="SERVICE_PAGINATE_INVALID",
+                context={"received": list(raw)},
+            )
+        total = raw.get("total")
+        if total is None:
+            total = len(items)
+        return PaginatedResult(
+            items=items,
+            metadata=PaginationMetadata.from_params(params, int(total)),
+        )
+    raise WebAdapterError(
+        message=(
+            "service.paginate() must return a PaginatedResult, an (items, "
+            "total) pair or a mapping with 'items'/'total'"
+        ),
+        code="SERVICE_PAGINATE_INVALID",
+        context={"received": type(raw).__name__},
     )
 
 
@@ -103,6 +165,71 @@ class ApiResource:
     #: subclass, or a raw field mapping).  When set, the CRUD handlers parse
     #: the JSON body once and validate it *before* calling the service.
     schema: Any = None
+
+    #: When ``True``, the resource refuses anonymous requests with 401
+    #: ``UNAUTHENTICATED`` before calling the service.
+    #: The check is done in every endpoint handler of this resource
+    #: (both the default CRUD handlers and custom ``endpoints()``).
+    #: Set ``authentication_required = True`` on subclasses to protect
+    #: every endpoint at once, or check ``request.user.is_anonymous``
+    #: in individual handlers.
+    authentication_required: bool = False
+
+    #: When ``True`` the default handlers run an authorization check through
+    #: the container ``"authorizer"`` service (canonical DI key) via
+    #: :func:`betrayer.auth.authorize` **after** authentication.  A denial
+    #: raises 403 ``FORBIDDEN`` (structured error envelope); routes without
+    #: the flag are untouched.
+    authorization_required: bool = False
+
+    #: Default action passed to the authorizer (e.g. ``"view"``, ``"update"``).
+    authorization_action: str = "access"
+
+    #: Optional per-method action overrides, e.g.
+    #: ``{"POST": "create", "PUT": "update", "DELETE": "delete"}``.
+    authorization_actions: Optional[Dict[str, str]] = None
+
+    #: Optional path parameter whose value is passed to the authorizer as
+    #: ``resource`` (``None`` passes no resource object).
+    authorization_resource_key: Optional[str] = None
+
+    #: Optional rate limit configuration for every endpoint of this resource.
+    #: When set (a ``RateLimit`` instance), the
+    #: :class:`~betrayer.ratelimit.RateLimitMiddleware` enforces the limit.
+    #: Resources without ``rate_limit`` are **not** rate limited.
+    #: Per-route overrides are possible through the route's metadata dict.
+    #:
+    #: Usage::
+    #:
+    #:     from betrayer.ratelimit import RateLimit
+    #:
+    #:     class ProductResource(CrudApiResource):
+    #:         rate_limit = RateLimit(limit=100, window=60)
+    rate_limit: Any = None
+
+    #: Optional HTTP cache TTL in seconds for ``GET``/``HEAD`` responses.
+    #: When set (an ``int`` or a ``CachePolicy`` instance), the
+    #: :class:`~betrayer.cache.WebCacheMiddleware` caches responses for the
+    #: specified duration.  Resources without ``cache_ttl`` are **not**
+    #: cached.  Per-route overrides are possible through the route's
+    #: metadata dict.
+    #:
+    #: Usage::
+    #:
+    #:     from betrayer.cache import CachePolicy
+    #:
+    #:     class ProductResource(CrudApiResource):
+    #:         cache_ttl = 60                    # simple int
+    #:         cache_ttl = CachePolicy(ttl=60)   # explicit policy
+    cache_ttl: Any = None
+
+    #: When ``True`` the collection (``GET {base}``) handler reads ``page`` /
+    #: ``per_page`` query parameters and returns ``meta.pagination`` metadata
+    #: next to the items.  The service is given ``page``/``per_page`` keywords
+    #: when it accepts them (optional ``paginate()`` method); otherwise the
+    #: collection is paginated in memory.  Endpoints without the flag are
+    #: completely untouched.
+    pagination: bool = False
 
     def __init__(
         self,
@@ -156,8 +283,19 @@ class ApiResource:
         created: List[Route] = []
         for method, path, handler in self.endpoints():
             full = base + str(path)
+            meta: Dict[str, Any] = {}
+            if self.rate_limit is not None:
+                from betrayer.ratelimit.limit import RateLimit as _RateLimit
+                if isinstance(self.rate_limit, _RateLimit):
+                    meta["rate_limit"] = self.rate_limit
+            if self.cache_ttl is not None:
+                from betrayer.cache.policy import CachePolicy as _CachePolicy
+                if isinstance(self.cache_ttl, _CachePolicy):
+                    meta["cache_policy"] = self.cache_ttl
+                elif isinstance(self.cache_ttl, (int, float)):
+                    meta["cache_policy"] = _CachePolicy(ttl=self.cache_ttl)
             created.append(
-                router.add(method, full, handler, module=self.name)
+                router.add(method, full, handler, module=self.name, metadata=meta)
             )
         return created
 
@@ -246,6 +384,31 @@ class ApiResource:
 
     # -- request/response helpers (thin, no business logic) -----------
     @staticmethod
+    def require_authentication(request: Any) -> None:
+        """Raise :class:`~betrayer.auth.UnauthenticatedError` when the request
+        has no authenticated identity.
+
+        Use this in custom endpoint handlers when :attr:`authentication_required`
+        is not set on the class::
+
+            async def my_handler(self, request, context):
+                self.require_authentication(request)
+                # ... authenticated-only logic ...
+
+        The check reads ``request.user.is_anonymous`` which the
+        :class:`~betrayer.auth.AuthenticationMiddleware` sets on every
+        request (it is always an :class:`~betrayer.auth.Identity` or
+        :class:`~betrayer.auth.AnonymousIdentity`).
+        """
+        user = getattr(request, "user", None)
+        if user is None or getattr(user, "is_anonymous", True):
+            from betrayer.auth.errors import UnauthenticatedError
+
+            raise UnauthenticatedError(
+                message="Authentication is required to access this resource",
+            )
+
+    @staticmethod
     def param(request: Request, name: str, *, cast: Callable[[Any], Any] = None) -> Any:
         """Return a path parameter, optionally coerced via ``cast``."""
         value = request.param(name)
@@ -301,12 +464,131 @@ class ApiResource:
             )
         return body
 
+    def paginated_collection(
+        self,
+        request: Request,
+        context: WebContext,
+        *,
+        resource: Optional[str] = None,
+    ) -> Response:
+        """Build a paginated collection response for ``GET {base}``.
+
+        Reads and validates ``page`` / ``per_page`` through
+        :func:`~betrayer.web.pagination.parse_pagination`, asks the resolved
+        service for the page, and returns the standard collection envelope
+        with ``meta.pagination`` metadata::
+
+            {
+              "success": true,
+              "data": [...],
+              "meta": {"resource": "product", "count": 20,
+                       "pagination": {"page": 2, "per_page": 20,
+                                      "total": 135, "total_pages": 7}}
+            }
+
+        The service may expose a canonical ``paginate(page=, per_page=)``
+        method (returning a :class:`~betrayer.web.pagination.PaginatedResult`
+        or a ``(items, total)`` pair); otherwise the whole ``service.list()``
+        collection is paginated in memory with
+        :func:`~betrayer.web.pagination.paginate_sequence`.  Invalid
+        parameters raise the framework ``ValidationError`` (422) through the
+        existing validation pipeline.
+        """
+        params = parse_pagination(request)
+        service = self.resolve_service(context)
+        result = self._paginate_service(service, params)
+        return _collection_response(
+            result.items,
+            resource=resource or self.name,
+            pagination=result.metadata,
+        )
+
+    @staticmethod
+    def _paginate_service(service: Any, params: PaginationParams) -> PaginatedResult:
+        """Ask ``service`` for one page; fall back to in-memory pagination.
+
+        Priority: a canonical ``service.paginate(page=..., per_page=...)``
+        (returns a ``PaginatedResult`` or a ``(items, total)`` pair), then a
+        ``service.list(page=..., per_page=...)`` that supports pagination
+        keywords, then in-memory slicing of ``service.list()``.
+
+        The fallback keeps ``meta.pagination.total`` truthful (the whole
+        collection count) while only the requested page is sliced.
+        """
+        paginate = getattr(service, "paginate", None)
+        if callable(paginate):
+            raw = paginate(page=params.page, per_page=params.per_page)
+            return _coerce_paginated(raw, params)
+        list_fn = getattr(service, "list", None)
+        if callable(list_fn):
+            try:
+                items = list_fn(page=params.page, per_page=params.per_page)
+            except TypeError:
+                items = list_fn()
+            return paginate_sequence(items, params)
+        raise TypeError(
+            f"Service {type(service).__name__} does not expose list()/paginate() "
+            "needed for pagination"
+        )
+
     @staticmethod
     def not_found(message: str = "Resource not found") -> None:
         """Raise :class:`~betrayer.web.exceptions.NotFoundError` (404)."""
         from betrayer.web.exceptions import NotFoundError
 
         raise NotFoundError(message)
+
+    # -- authentication helper (Task 16.1) -----------------------------
+    def _enforce_authentication(self, request: Any) -> None:
+        """Check :attr:`authentication_required` and raise 401 if needed."""
+        if self.authentication_required:
+            self.require_authentication(request)
+
+    # -- authorization helper (Task 16.2) -------------------------------
+    def require_authorization(
+        self,
+        request: Any,
+        context: Any,
+        *,
+        action: Optional[str] = None,
+    ) -> None:
+        """Run the authorization check for ``request`` (explicit form).
+
+        Uses the container ``"authorizer"`` service (or
+        ``self.authorizer`` when set) through
+        :func:`betrayer.auth.authorize`; a denial raises 403
+        ``FORBIDDEN`` with the structured error envelope.  Use this in
+        custom handlers when :attr:`authorization_required` is not set::
+
+            async def secret(self, request, context):
+                self.require_authorization(request, context, action="view")
+                ...
+
+        Called automatically by the default CRUD handlers when the
+        resource declares ``authorization_required = True``.
+        """
+        if not self.authorization_required and action is None:
+            return
+        resolved_action = (
+            action
+            or (self.authorization_actions or {}).get(getattr(request, "method", ""))
+            or self.authorization_action
+        )
+        resource = None
+        if self.authorization_resource_key:
+            resource = request.param(str(self.authorization_resource_key))
+        authorize(
+            getattr(request, "user", None),
+            resolved_action,
+            resource=resource,
+            context=context,
+            authorizer=getattr(self, "authorizer", None),
+        )
+
+    def _enforce_authorization(self, request: Any, context: Any) -> None:
+        """Run :meth:`require_authorization` when the flag is set (no-op otherwise)."""
+        if self.authorization_required:
+            self.require_authorization(request, context)
 
     # -- introspection ------------------------------------------------
     def to_dict(self) -> dict:
@@ -371,14 +653,24 @@ class CrudApiResource(ApiResource):
 
     # -- handlers (thin delegation, business logic stays in the service)
     async def list_handler(self, request: Request, context: WebContext) -> Response:
-        """GET {base} -- list all items through the service."""
-        service = self.resolve_service(context)
-        return _collection_response(
-            service.list(), resource=self.name
-        )
+        """GET {base} -- list items through the service.
+
+        When :attr:`pagination` is ``True`` the handler reads and validates
+        ``page`` / ``per_page``, asks the service for one page and attaches
+        ``meta.pagination``; otherwise it behaves exactly as before
+        (``service.list()`` -> ``data`` + ``meta``).
+        """
+        self._enforce_authentication(request)
+        self._enforce_authorization(request, context)
+        if not self.pagination:
+            service = self.resolve_service(context)
+            return _collection_response(service.list(), resource=self.name)
+        return self.paginated_collection(request, context, resource=self.name)
 
     async def get_handler(self, request: Request, context: WebContext) -> Response:
         """GET {base}/<id> -- fetch one item through the service."""
+        self._enforce_authentication(request)
+        self._enforce_authorization(request, context)
         service = self.resolve_service(context)
         identifier = request.param("id")
         item = service.get(identifier)
@@ -388,6 +680,8 @@ class CrudApiResource(ApiResource):
 
     async def create_handler(self, request: Request, context: WebContext) -> Response:
         """POST {base} -- validate then create an item through the service."""
+        self._enforce_authentication(request)
+        self._enforce_authorization(request, context)
         service = self.resolve_service(context)
         body = self.validated_body(request, context)
         item = service.create(**body)
@@ -399,6 +693,8 @@ class CrudApiResource(ApiResource):
 
     async def update_handler(self, request: Request, context: WebContext) -> Response:
         """PUT {base}/<id> -- validate (partial) then update through the service."""
+        self._enforce_authentication(request)
+        self._enforce_authorization(request, context)
         service = self.resolve_service(context)
         identifier = request.param("id")
         body = self.validated_body(request, context, partial=True)
@@ -409,6 +705,8 @@ class CrudApiResource(ApiResource):
 
     async def delete_handler(self, request: Request, context: WebContext) -> Response:
         """DELETE {base}/<id> -- delete an item through the service."""
+        self._enforce_authentication(request)
+        self._enforce_authorization(request, context)
         service = self.resolve_service(context)
         identifier = request.param("id")
         deleted = service.delete(identifier)

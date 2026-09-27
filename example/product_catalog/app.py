@@ -24,17 +24,26 @@ from betrayer.data.bootstrap import install_database
 from betrayer.web import FlaskAdapter
 
 from example.product_catalog.migrations import MIGRATIONS
-from example.product_catalog.module import ProductCatalogModule
+from example.product_catalog.module import ProductCatalogModule, SERVICE_KEY
+from example.product_catalog.product_channel import (
+    PRODUCT_CHANNEL,
+    PRODUCT_CREATED_EVENT,
+    build_realtime,
+    build_websocket_app,
+)
 from example.product_catalog.routes import ProductResource
 
 __all__ = [
     "APP_NAME",
     "DEFAULT_DATABASE",
+    "PRODUCT_CHANNEL",
+    "PRODUCT_CREATED_EVENT",
     "build_config",
     "build_application",
     "migration_registry",
     "apply_migrations",
     "create_flask_app",
+    "create_realtime_app",
 ]
 
 #: Application name reported by ``app.status()`` / introspection.
@@ -111,3 +120,24 @@ def create_flask_app(
     resource = ProductResource()
     adapter = FlaskAdapter(application, resource.resource_router())
     return adapter.build()
+
+
+def create_realtime_app(
+    application: Optional[BetrayerApplication] = None,
+    *,
+    database_path: Optional[str] = None,
+) -> Any:
+    """Return the Flask app with the WebSocket blueprint mounted.
+
+    The REST API (via :class:`~betrayer.web.adapter.FlaskAdapter`) and the
+    realtime channel (via :class:`~betrayer.web.ws_adapter.FlaskRealtimeAdapter`)
+    share the *same* Flask app.  Inbound WebSocket messages reuse the same
+    ``ProductService`` as the HTTP resource, so no business logic is duplicated.
+    """
+    application = application or build_application(database_path=database_path)
+    # REST first (builds the underlying Flask app).
+    flask_app = create_flask_app(application)
+    # Realtime manager + WebSocket blueprint on the same app.
+    manager = build_realtime(application)
+    service = application.container.resolve(SERVICE_KEY)
+    return build_websocket_app(flask_app, manager, service)

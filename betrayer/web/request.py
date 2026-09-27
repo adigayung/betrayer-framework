@@ -31,6 +31,19 @@ class Request:
     ``raw`` is the underlying Flask request; when it is ``None`` the current
     request proxy is used lazily, which is how the adapter builds requests
     inside a Flask view.
+
+    **User / identity** -- the canonical way to access the current identity::
+
+        if request.user.is_authenticated:
+            name = request.user.name
+        else:
+            # anonymous request
+
+    ``request.user`` is set by the
+    :class:`~betrayer.auth.AuthenticationMiddleware` (it is always an
+    :class:`~betrayer.auth.Identity` or
+    :class:`~betrayer.auth.AnonymousIdentity`).  It defaults to
+    ``AnonymousIdentity`` when no middleware ran.
     """
 
     def __init__(
@@ -46,6 +59,10 @@ class Request:
         #: Memoised JSON body.  ``get_json`` parses at most once per request,
         #: so the validation pipeline never re-parses the body.
         self._json_cache: Any = _MISSING
+        #: Identity of the current request.  Set by the
+        #: :class:`~betrayer.auth.AuthenticationMiddleware`; defaults to
+        #: ``AnonymousIdentity`` when no middleware ran.
+        self._user: Any = _MISSING
 
     # -- construction -------------------------------------------------
     @classmethod
@@ -74,6 +91,28 @@ class Request:
         if self._raw is None:
             self._raw = import_flask_request()
         return self._raw
+
+    # -- user / identity (Task 16.1) ------------------------------------
+
+    @property
+    def user(self) -> Any:
+        """The authenticated identity of this request.
+
+        Returns an :class:`~betrayer.auth.Identity` when the request is
+        authenticated, or an :class:`~betrayer.auth.AnonymousIdentity` when
+        it is anonymous (including when no authentication middleware ran).
+
+        This is **always** safe to access — it never raises.
+        """
+        if self._user is _MISSING:
+            from betrayer.auth.identity import AnonymousIdentity
+
+            self._user = AnonymousIdentity()
+        return self._user
+
+    def set_user(self, identity: Any) -> None:
+        """Set the request identity (called by the authentication middleware)."""
+        self._user = identity
 
     # -- path parameters ----------------------------------------------
     def param(self, name: str, default: Any = None) -> Any:

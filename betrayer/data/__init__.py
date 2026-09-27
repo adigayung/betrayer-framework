@@ -31,6 +31,7 @@ from betrayer.data.cache import (
     CacheBackend,
     CacheManager,
     MemoryCacheBackend,
+    _MISSING as CacheMissSentinel,
 )
 from betrayer.data.compiler import CompiledQuery, QueryCompiler
 from betrayer.data.database import (
@@ -134,6 +135,7 @@ __all__ = [
     "CacheBackend",
     "CacheManager",
     "MemoryCacheBackend",
+    "CacheMissSentinel",
     # storage
     "StorageBackend",
     "StorageManager",

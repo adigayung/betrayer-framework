@@ -39,7 +39,7 @@ application and routers given to its constructor.
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from betrayer.web.context import WebContext
 from betrayer.web.errors import register_web_error_handlers
@@ -199,6 +199,65 @@ class FlaskAdapter:
                 )
         return self
 
+    # -- adapter helpers to reach the middleware registry ----------------
+    @property
+    def _middleware_registry(self) -> Any:
+        """Resolve the web middleware registry from the application, if any."""
+        try:
+            return self.application.registry.get("web.middleware")
+        except Exception:  # noqa: BLE001 - no registry = no middleware
+            return None
+
+    # -- pipeline execution ------------------------------------------------
+    def pipeline_for(
+        self,
+        route: Any,
+        request: Any,
+        context: Any,
+    ) -> "WebPipeline":
+        """Build a :class:`WebPipeline` for one request, combining route-level
+        and global middleware in the documented order:
+
+        1. middleware declared on the route (in the order listed on the route),
+        2. the global middleware registry ordered ascending by
+           ``(priority, registration index)``.
+
+        Returns a ``WebPipeline`` that is ready to run ``before_request`` /
+        ``after_request`` / ``on_error`` hooks.
+        """
+        from betrayer.web.middleware import WebPipeline as _WebPipeline
+
+        middleware_objects: List[Any] = []
+        seen: set = set()
+
+        mw_registry = self._middleware_registry
+
+        # 1. Route-level middleware (resolved by name from the registry)
+        if mw_registry is not None:
+            for name in getattr(route, "middleware", ()):
+                if name not in seen:
+                    try:
+                        middleware_objects.append(
+                            mw_registry.get(name)
+                        )
+                        seen.add(name)
+                    except Exception:  # noqa: BLE001 - skip unregistered middleware
+                        pass
+
+        # 2. Global middleware (enabled ones, ordered)
+        if mw_registry is not None:
+            for mw in mw_registry.active():
+                name = getattr(mw, "middleware_name", lambda: type(mw).__name__)()
+                if name not in seen:
+                    middleware_objects.append(mw)
+                    seen.add(name)
+
+        return _WebPipeline(
+            middleware=middleware_objects,
+            request=request,
+            context=context,
+        )
+
     # -- internals ------------------------------------------------------
     @staticmethod
     def _flask_path(path: str) -> str:
@@ -259,6 +318,9 @@ class FlaskAdapter:
         synchronous handlers get a plain synchronous view.  Both paths share
         the same request/context plumbing; only the final conversion to a
         Flask response differs (the async path awaits first).
+
+        Middleware hooks are executed through :meth:`pipeline_for` and
+        :class:`~betrayer.web.middleware.WebPipeline.run`.
         """
 
         def _request_and_context(path_params: dict) -> tuple:
@@ -277,7 +339,12 @@ class FlaskAdapter:
             async def async_view(**path_params: Any) -> Any:
                 request, context = _request_and_context(path_params)
                 try:
-                    result = await self._invoke(route, request, context)
+                    pipeline = self.pipeline_for(route, request, context)
+
+                    async def call_handler():
+                        return await self._invoke(route, request, context)
+
+                    result = await pipeline.run_async(call_handler)
                     return self._to_flask_response(result)
                 except BaseException as exc:  # noqa: BLE001 - edge must never leak
                     return self._error_response(exc)
@@ -287,7 +354,10 @@ class FlaskAdapter:
         def view(**path_params: Any) -> Any:
             request, context = _request_and_context(path_params)
             try:
-                result = self._invoke(route, request, context)
+                pipeline = self.pipeline_for(route, request, context)
+                result = pipeline.run(
+                    handler=lambda: self._invoke(route, request, context)
+                )
                 return self._to_flask_response(result)
             except BaseException as exc:  # noqa: BLE001 - edge must never leak
                 return self._error_response(exc)

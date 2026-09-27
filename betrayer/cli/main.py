@@ -40,6 +40,12 @@ from betrayer.core.meta import (
     __version__,
 )
 from betrayer.diagnostics.inspector import Inspector
+from betrayer.diagnostics.store import (
+    CHECK_STATUS_ERROR,
+    CHECK_STATUS_PASS,
+    CHECK_STATUS_WARNING,
+    DiagnosticsStore,
+)
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 MANIFEST_PATH: Path = PROJECT_ROOT / ".betrayer" / "manifest.json"
@@ -55,9 +61,15 @@ COMMAND_HELP = {
     "config": "show effective configuration (secrets masked)",
     "doctor": "run foundation health checks",
     "validate": "validate the foundation (imports, structure, lifecycle, ...)",
+        "check": "quick project/framework health check (PASS/WARNING/ERROR)",
+        "debug": "diagnose requests, errors, and traces",
         "manifest": "show or regenerate the machine readable framework manifest",
         "create": "create a new Betrayer application project",
         "make": "generate project artifacts (e.g. a new module or resource)",
+        "discover": "discover Betrayer capabilities (list, get <name>, search <query>)",
+        "queue": "inspect or run the job queue (use --json for machine output)",
+        "schedule": "inspect or run due scheduled jobs (use --json for machine output)",
+        "realtime": "introspect the realtime (WebSocket) layer (use --json for machine output)",
         "test": "run tests (canonical testing system)",
     }
 
@@ -544,15 +556,766 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     if as_json:
         _print_json(report)
         return 0 if report["ok"] else 1
+    label_width = max(len(c["name"]) for c in report["checks"]) + 2
     for check in report["checks"]:
-        if check["status"] == "ok":
-            print(f"[OK] {check['name']}")
+        name = check["name"]
+        status = check["status"]
+        if status == "ok":
+            status_label = "PASS"
+            print(f"{name:.<{label_width}} {status_label}")
+            detail = check.get("detail", "")
+            if detail:
+                print(f"  {detail}")
         else:
-            print(f"[FAIL] {check['name']}")
-            print(f"Reason: {check.get('reason', 'unknown')}")
-            print(f"Suggested check: {check.get('suggestion', 'inspect the component manually')}")
-    print("Doctor: " + ("all checks passed" if report["ok"] else "problems detected"))
+            status_label = "ERROR"
+            print(f"{name:.<{label_width}} {status_label}")
+            reason = check.get("reason", "unknown")
+            print(f"  {reason}")
+            suggestion = check.get("suggestion", "")
+            if suggestion:
+                print(f"  Suggested: {suggestion}")
+        print("")
+    print_summary = "all checks passed" if report["ok"] else "problems detected"
+    print(f"Doctor: {print_summary} ({report['summary']})")
     return 0 if report["ok"] else 1
+
+
+def _cmd_check(args: argparse.Namespace) -> int:
+    """Quick project/framework health check."""
+    as_json = _as_json(args)
+    application = _ready_application()
+    checks: list[dict] = []
+
+    # 1. Project structure
+    structure_checks = _check_structure()
+    checks.append(structure_checks)
+
+    # 2. Configuration
+    config_checks = _check_config(application)
+    checks.append(config_checks)
+
+    # 3. Environment
+    env_checks = _check_env(application)
+    checks.append(env_checks)
+
+    # 4. Imports
+    import_checks = _check_imports_main()
+    checks.append(import_checks)
+
+    # 5. Module registration
+    module_checks = _check_modules(application)
+    checks.append(module_checks)
+
+    # 6. Database configuration
+    db_checks = _check_database(application)
+    checks.append(db_checks)
+
+    # 7. Migration state
+    migration_checks = _check_migrations(application)
+    checks.append(migration_checks)
+
+    # 8. Application bootstrap
+    bootstrap_checks = _check_bootstrap(application)
+    checks.append(bootstrap_checks)
+
+    # 9. Required dependencies
+    dep_checks = _check_dependencies(application)
+    checks.append(dep_checks)
+
+    # Determine overall status
+    error_count = sum(1 for c in checks if c["status"] == CHECK_STATUS_ERROR)
+    warning_count = sum(1 for c in checks if c["status"] == CHECK_STATUS_WARNING)
+    if error_count > 0:
+        overall_status = CHECK_STATUS_ERROR
+    elif warning_count > 0:
+        overall_status = CHECK_STATUS_WARNING
+    else:
+        overall_status = CHECK_STATUS_PASS
+
+    result = {
+        "success": overall_status == CHECK_STATUS_PASS,
+        "status": overall_status,
+        "checks": checks,
+        "summary": {
+            "passed": sum(1 for c in checks if c["status"] == CHECK_STATUS_PASS),
+            "warnings": warning_count,
+            "errors": error_count,
+            "total": len(checks),
+        },
+    }
+
+    if as_json:
+        _print_json(result)
+        return 0 if overall_status != CHECK_STATUS_ERROR else 1
+
+    print(f"Betrayer Project Check ({overall_status})")
+    print("")
+    for check in checks:
+        name = check["name"]
+        status = check["status"]
+        if status == CHECK_STATUS_PASS:
+            print(f"  [{CHECK_STATUS_PASS}] {name}")
+        elif status == CHECK_STATUS_WARNING:
+            print(f"  [{CHECK_STATUS_WARNING}] {name}")
+            if check.get("message"):
+                print(f"       {check['message']}")
+        else:
+            print(f"  [{CHECK_STATUS_ERROR}] {name}")
+            if check.get("message"):
+                print(f"       {check['message']}")
+            if check.get("suggested_actions"):
+                for action in check["suggested_actions"]:
+                    print(f"       -> {action}")
+    print("")
+    print(f"Summary: {result['summary']['passed']} passed, "
+          f"{result['summary']['warnings']} warnings, "
+          f"{result['summary']['errors']} errors")
+    return 0 if overall_status != CHECK_STATUS_ERROR else 1
+
+
+def _check_structure() -> dict:
+    """Check that required project files and directories exist."""
+    from pathlib import Path
+    root = Path.cwd()
+    required = ["betrayer", "pyproject.toml", "setup.py"]
+    missing = [p for p in required if not (root / p).exists()]
+    if missing:
+        return {
+            "name": "project_structure",
+            "status": CHECK_STATUS_ERROR,
+            "message": f"Missing: {', '.join(missing)}",
+            "suggested_actions": ["Run 'bet create' to scaffold the project."],
+        }
+    return {
+        "name": "project_structure",
+        "status": CHECK_STATUS_PASS,
+        "message": "All required files and directories found.",
+    }
+
+
+def _check_config(application: Any) -> dict:
+    """Check configuration validity."""
+    diagnostics: list[str] = []
+    try:
+        config = application.config
+        if config is None:
+            return {
+                "name": "configuration",
+                "status": CHECK_STATUS_ERROR,
+                "message": "No configuration found.",
+                "suggested_actions": ["Ensure Bootstrap is called."],
+            }
+        safe_keys = config.keys(safe=True)
+        if not safe_keys:
+            return {
+                "name": "configuration",
+                "status": CHECK_STATUS_WARNING,
+                "message": "Configuration is empty.",
+            }
+        return {
+            "name": "configuration",
+            "status": CHECK_STATUS_PASS,
+            "message": f"{len(safe_keys)} configuration keys available.",
+        }
+    except Exception as exc:
+        return {
+            "name": "configuration",
+            "status": CHECK_STATUS_ERROR,
+            "message": f"Configuration check failed: {exc}",
+            "suggested_actions": ["Check configuration file syntax."],
+        }
+
+
+def _check_env(application: Any) -> dict:
+    """Check environment detection."""
+    try:
+        env = application.environment
+        if env is None:
+            return {
+                "name": "environment",
+                "status": CHECK_STATUS_ERROR,
+                "message": "Environment not detected.",
+                "suggested_actions": ["Run 'bet doctor' for details."],
+            }
+        return {
+            "name": "environment",
+            "status": CHECK_STATUS_PASS,
+            "message": f"OS={env.os_name}, Python={env.python_version}, Mode={env.mode}",
+        }
+    except Exception as exc:
+        return {
+            "name": "environment",
+            "status": CHECK_STATUS_ERROR,
+            "message": f"Environment detection failed: {exc}",
+        }
+
+
+def _check_imports_main() -> dict:
+    """Check that all required framework modules can be imported."""
+    import importlib
+    required = REQUIRED_MODULES
+    failed: list[str] = []
+    for mod in required:
+        try:
+            importlib.import_module(mod)
+        except Exception as exc:
+            failed.append(f"{mod}: {exc}")
+    if failed:
+        return {
+            "name": "imports",
+            "status": CHECK_STATUS_ERROR,
+            "message": f"{len(failed)} module(s) failed to import.",
+            "context": {"failed": failed},
+            "suggested_actions": ["Check PYTHONPATH and package installation."],
+        }
+    return {
+        "name": "imports",
+        "status": CHECK_STATUS_PASS,
+        "message": f"All {len(required)} required modules import successfully.",
+    }
+
+
+def _check_modules(application: Any) -> dict:
+    """Check module registration."""
+    try:
+        modules = getattr(application, "modules", None)
+        if modules is None:
+            return {
+                "name": "module_registration",
+                "status": CHECK_STATUS_WARNING,
+                "message": "Module system not available.",
+            }
+        # Check if any modules are registered
+        if hasattr(modules, "names"):
+            names = list(modules.names())
+            return {
+                "name": "module_registration",
+                "status": CHECK_STATUS_PASS if names else CHECK_STATUS_WARNING,
+                "message": f"{len(names)} module(s) registered: {', '.join(names) if names else 'none'}",
+            }
+        return {
+            "name": "module_registration",
+            "status": CHECK_STATUS_PASS,
+            "message": "Module system available.",
+        }
+    except Exception as exc:
+        return {
+            "name": "module_registration",
+            "status": CHECK_STATUS_ERROR,
+            "message": f"Module check failed: {exc}",
+        }
+
+
+def _check_database(application: Any) -> dict:
+    """Check database configuration."""
+    try:
+        config = application.config
+        if config is None:
+            return {
+                "name": "database_configuration",
+                "status": CHECK_STATUS_WARNING,
+                "message": "Cannot check database: no configuration.",
+            }
+        driver = config.get("database.default.driver")
+        if driver is None:
+            return {
+                "name": "database_configuration",
+                "status": CHECK_STATUS_WARNING,
+                "message": "No database driver configured (optional for non-DB apps).",
+            }
+        return {
+            "name": "database_configuration",
+            "status": CHECK_STATUS_PASS,
+            "message": f"Driver: {driver}",
+        }
+    except Exception as exc:
+        return {
+            "name": "database_configuration",
+            "status": CHECK_STATUS_ERROR,
+            "message": f"Database check failed: {exc}",
+        }
+
+
+def _check_migrations(application: Any) -> dict:
+    """Check migration state."""
+    try:
+        container = getattr(application, "container", None)
+        if container is None:
+            return {
+                "name": "migration_state",
+                "status": CHECK_STATUS_WARNING,
+                "message": "Container not available; cannot check migrations.",
+            }
+        # Try to resolve migration registry if registered
+        if hasattr(container, "has") and container.has("migration_registry"):
+            return {
+                "name": "migration_state",
+                "status": CHECK_STATUS_PASS,
+                "message": "Migration registry is configured.",
+            }
+        return {
+            "name": "migration_state",
+            "status": CHECK_STATUS_PASS,
+            "message": "No migration registry (no migrations configured).",
+        }
+    except Exception as exc:
+        return {
+            "name": "migration_state",
+            "status": CHECK_STATUS_WARNING,
+            "message": f"Migration check skipped: {exc}",
+        }
+
+
+def _check_bootstrap(application: Any) -> dict:
+    """Check application bootstrap."""
+    state = getattr(application, "state", None)
+    if state is None:
+        return {
+            "name": "application_bootstrap",
+            "status": CHECK_STATUS_ERROR,
+            "message": "Application has no state.",
+            "suggested_actions": ["Call Bootstrap().build() on the application."],
+        }
+    state_value = getattr(state, "value", None)
+    if state_value in ("ready", "running"):
+        return {
+            "name": "application_bootstrap",
+            "status": CHECK_STATUS_PASS,
+            "message": f"Application is in '{state_value}' state.",
+        }
+    return {
+        "name": "application_bootstrap",
+        "status": CHECK_STATUS_ERROR,
+        "message": f"Application state is '{state_value}' (expected 'ready' or 'running').",
+        "suggested_actions": ["Call application.ready() or Bootstrap().build()."],
+    }
+
+
+def _check_dependencies(application: Any) -> dict:
+    """Check required dependencies."""
+    import importlib
+    required_packages = ["betrayer"]
+    missing: list[str] = []
+    for pkg in required_packages:
+        try:
+            importlib.import_module(pkg)
+        except ImportError:
+            missing.append(pkg)
+    if missing:
+        return {
+            "name": "required_dependencies",
+            "status": CHECK_STATUS_ERROR,
+            "message": f"Missing packages: {', '.join(missing)}",
+            "suggested_actions": ["Run 'pip install betrayer' or install from source."],
+        }
+    return {
+        "name": "required_dependencies",
+        "status": CHECK_STATUS_PASS,
+        "message": "All required dependencies are available.",
+    }
+
+
+def _cmd_debug(args: argparse.Namespace) -> int:
+    """Diagnose requests, errors, and traces."""
+    as_json = _as_json(args)
+    action = getattr(args, "debug_action", None)
+    application = _ready_application()
+    diagnostics = getattr(application, "diagnostics", None)
+
+    if action == "last":
+        return _debug_last(as_json, diagnostics)
+    elif action == "errors":
+        return _debug_errors(as_json, diagnostics)
+    elif action == "trace":
+        request_id = getattr(args, "request_id", None)
+        return _debug_trace(as_json, diagnostics, request_id)
+    elif action == "inspect":
+        request_id = getattr(args, "request_id", None)
+        return _debug_inspect(as_json, diagnostics, request_id)
+    else:
+        # Default: show summary
+        return _debug_summary(as_json, diagnostics)
+
+
+def _debug_summary(as_json: bool, diagnostics: Any) -> int:
+    """Show diagnostics summary."""
+    if diagnostics is None:
+        summary = {
+            "status": "no_diagnostics",
+            "message": "No diagnostics store available. Ensure Bootstrap was called.",
+            "summary": {"total_records": 0, "errors": 0, "warnings": 0},
+        }
+        if as_json:
+            _print_json(summary)
+        else:
+            print("Diagnostics: No diagnostics store available.")
+        return 0
+
+    summary = diagnostics.summary()
+    recent = diagnostics.recent(limit=5)
+    summary["recent"] = recent
+    if as_json:
+        _print_json(summary)
+    else:
+        print(f"Diagnostics Store: {summary['name']}")
+        print(f"Total Records: {summary['total_records']}")
+        print(f"Errors: {summary['errors']}")
+        print(f"Warnings: {summary['warnings']}")
+        print(f"Requests Tracked: {summary['requests_tracked']}")
+        print(f"Traces Recorded: {summary['traces_recorded']}")
+        print("")
+        if recent:
+            print("Recent Records:")
+            for r in recent:
+                ts = r.get("timestamp", "")
+                level = r.get("level", "?").upper()
+                msg = r.get("message", "")
+                print(f"  [{level}] {msg}")
+        else:
+            print("No recent records.")
+    return 0
+
+
+def _debug_last(as_json: bool, diagnostics: Any) -> int:
+    """Show the last recorded diagnostic record."""
+    if diagnostics is None:
+        if as_json:
+            _print_json({"status": "no_diagnostics", "message": "No store available"})
+        else:
+            print("No diagnostics store available.")
+        return 0
+    recent = diagnostics.recent(limit=1)
+    if not recent:
+        if as_json:
+            _print_json({"status": "empty", "message": "No records yet"})
+        else:
+            print("No diagnostic records yet.")
+        return 0
+    record = recent[0]
+    if as_json:
+        _print_json(record)
+    else:
+        _print_diagnostic_record(record)
+    return 0
+
+
+def _debug_errors(as_json: bool, diagnostics: Any) -> int:
+    """Show error records."""
+    if diagnostics is None:
+        if as_json:
+            _print_json({"status": "no_diagnostics", "message": "No store available"})
+        else:
+            print("No diagnostics store available.")
+        return 0
+    errors = diagnostics.errors(limit=50)
+    if as_json:
+        _print_json({"errors": errors, "count": len(errors)})
+    else:
+        if not errors:
+            print("No errors recorded.")
+            return 0
+        print(f"Errors ({len(errors)}):")
+        print("")
+        for err in errors:
+            ts = err.get("timestamp", "")
+            code = err.get("code", "?")
+            msg = err.get("message", "")
+            rid = err.get("request_id", "-")
+            comp = err.get("component", "?")
+            print(f"  [{code}] {msg}")
+            print(f"       Time: {ts} | Component: {comp} | Request: {rid}")
+            print("")
+    return 0
+
+
+def _debug_trace(as_json: bool, diagnostics: Any, request_id: Optional[str]) -> int:
+    """Show request trace steps."""
+    if diagnostics is None:
+        if as_json:
+            _print_json({"status": "no_diagnostics"})
+        else:
+            print("No diagnostics store available.")
+        return 0
+    if not request_id:
+        if as_json:
+            _print_json({"status": "missing_request_id"})
+        else:
+            print("Usage: bet debug trace <request_id>")
+        return 1
+    trace = diagnostics.get_trace(request_id)
+    if trace is None:
+        if as_json:
+            _print_json({"status": "not_found", "request_id": request_id})
+        else:
+            print(f"No trace found for request: {request_id}")
+        return 1
+
+    result = {"request_id": request_id, "trace": trace}
+    if as_json:
+        _print_json(result)
+    else:
+        print(f"Trace for request: {request_id}")
+        print("")
+        arrow = "  ↓"
+        for step in trace:
+            layer = step.get("layer", "?")
+            component = step.get("component", "?")
+            status = step.get("status", "?")
+            detail = step.get("detail", "")
+            print(f"  {layer}: {component}")
+            print(f"    status={status} | {detail}")
+            print(arrow)
+        print("  [end]")
+    return 0
+
+
+def _debug_inspect(as_json: bool, diagnostics: Any, request_id: Optional[str]) -> int:
+    """Show detailed request information."""
+    if diagnostics is None:
+        if as_json:
+            _print_json({"status": "no_diagnostics"})
+        else:
+            print("No diagnostics store available.")
+        return 0
+    if not request_id:
+        if as_json:
+            _print_json({"status": "missing_request_id"})
+        else:
+            print("Usage: bet debug inspect <request_id>")
+        return 1
+    request_info = diagnostics.get_request(request_id)
+    if request_info is None:
+        if as_json:
+            _print_json({"status": "not_found", "request_id": request_id})
+        else:
+            print(f"No request info found for: {request_id}")
+        return 1
+
+    if as_json:
+        _print_json(request_info)
+    else:
+        print(f"Request Inspection: {request_id}")
+        print("")
+        code = request_info.get("code", "?")
+        level = request_info.get("level", "?")
+        message = request_info.get("message", "")
+        component = request_info.get("component", "?")
+        actions = request_info.get("suggested_actions", [])
+        trace = request_info.get("trace", [])
+
+        print(f"  Code:       {code}")
+        print(f"  Level:      {level}")
+        print(f"  Component:  {component}")
+        print(f"  Message:    {message}")
+
+        if actions:
+            print("  Suggested Actions:")
+            for a in actions:
+                print(f"    - {a}")
+
+        if trace:
+            print(f"  Trace ({len(trace)} steps):")
+            for step in trace:
+                layer = step.get("layer", "?")
+                comp = step.get("component", "?")
+                status = step.get("status", "?")
+                dur = step.get("duration_ms", 0)
+                print(f"    [{layer}] {comp}: {status} ({dur}ms)")
+    return 0
+
+
+def _print_diagnostic_record(record: dict) -> None:
+    """Print a single diagnostic record in human-readable format."""
+    level = record.get("level", "?").upper()
+    code = record.get("code", "?")
+    msg = record.get("message", "")
+    component = record.get("component", "?")
+    rid = record.get("request_id")
+    tid = record.get("trace_id")
+    actions = record.get("suggested_actions", [])
+
+    print(f"[{level}] {code}: {msg}")
+    print(f"  Component: {component}")
+    if rid:
+        print(f"  Request ID: {rid}")
+    if tid:
+        print(f"  Trace ID: {tid}")
+    if actions:
+        print("  Suggested Actions:")
+        for a in actions:
+            print(f"    - {a}")
+
+
+def _configure_debug(parser: argparse.ArgumentParser) -> None:
+    """Configure the ``bet debug`` subcommand parser."""
+    # --json is consumed from the parent; subparsers need their own.
+    subparsers = parser.add_subparsers(dest="debug_action", metavar="subcommand")
+
+    # last
+    last_parser = subparsers.add_parser(
+        "last",
+        help="show last diagnostic record",
+        description="Show last diagnostic record",
+    )
+    last_parser.add_argument("--json", action="store_true", help="emit machine readable JSON output", default=None)
+
+    # errors
+    err_parser = subparsers.add_parser(
+        "errors",
+        help="list error records",
+        description="List error records",
+    )
+    err_parser.add_argument("--json", action="store_true", help="emit machine readable JSON output", default=None)
+
+    # trace <request_id>
+    trace_parser = subparsers.add_parser(
+        "trace",
+        help="show request trace",
+        description="Show request trace steps",
+    )
+    trace_parser.add_argument("request_id", metavar="request_id", help="Request ID to trace")
+    trace_parser.add_argument("--json", action="store_true", help="emit machine readable JSON output", default=None)
+
+    # inspect <request_id>
+    inspect_parser = subparsers.add_parser(
+        "inspect",
+        help="inspect a request/error",
+        description="Inspect a request or error in detail",
+    )
+    inspect_parser.add_argument("request_id", metavar="request_id", help="Request ID to inspect")
+    inspect_parser.add_argument("--json", action="store_true", help="emit machine readable JSON output", default=None)
+
+
+# ── queue command ──────────────────────────────────────────────
+
+
+def _cmd_queue(args: argparse.Namespace) -> int:
+    """Show the state of the default in-memory queue, or run jobs."""
+    from betrayer.jobs import Queue, JobRunner
+
+    queue = Queue()
+    runner = JobRunner(queue)
+    as_json = _as_json(args)
+
+    action = getattr(args, "queue_action", None)
+    if action == "run":
+        results = runner.run_available()
+        if as_json:
+            _print_json({
+                "action": "run",
+                "queue": queue.to_dict(),
+                "results": [r.to_dict() for r in results],
+            })
+        else:
+            print(f"Queue: {queue.name} ({queue.size()} remaining)")
+            for r in results:
+                status = "OK" if r.success else "FAIL"
+                print(f"  [{status}] {r.job}: {r.duration:.4f}s")
+        return 0
+
+    # default: show queue info
+    if as_json:
+        _print_json(queue.to_dict())
+    else:
+        print(f"Queue name : {queue.name}")
+        print(f"Size       : {queue.size()}")
+        print(f"Backend    : InMemoryQueue")
+    return 0
+
+
+def _configure_queue(parser: argparse.ArgumentParser) -> None:
+    """Configure ``bet queue`` subcommands."""
+    subparsers = parser.add_subparsers(dest="queue_action", metavar="action")
+    subparsers.add_parser("run", help="run all available queued jobs")
+
+
+# ── schedule command ────────────────────────────────────────────
+
+
+def _cmd_schedule(args: argparse.Namespace) -> int:
+    """Show or run scheduled jobs."""
+    from betrayer.jobs import Scheduler, Queue, JobRunner
+
+    queue = Queue()
+    runner = JobRunner(queue)
+    scheduler = Scheduler(queue=queue, runner=runner)
+    as_json = _as_json(args)
+
+    action = getattr(args, "schedule_action", None)
+    if action == "run":
+        results = scheduler.run_due()
+        if as_json:
+            _print_json({
+                "action": "run_due",
+                "scheduler": scheduler.to_dict(),
+                "results": [r.to_dict() for r in results],
+            })
+        else:
+            print(f"Running due jobs... ({len(results)} executed)")
+            for r in results:
+                status = "OK" if r.success else "FAIL"
+                print(f"  [{status}] {r.job}: {r.duration:.4f}s")
+        return 0
+
+    # default: list scheduled jobs
+    jobs = scheduler.list_jobs()
+    if as_json:
+        _print_json({"scheduled": len(jobs), "jobs": jobs})
+    else:
+        print(f"Scheduled jobs: {len(jobs)}")
+        for j in jobs:
+            print(f"  {j['name']}: every {j['interval_seconds']}s, ran {j['run_count']}x")
+    return 0
+
+
+def _configure_schedule(parser: argparse.ArgumentParser) -> None:
+    """Configure ``bet schedule`` subcommands."""
+    subparsers = parser.add_subparsers(dest="schedule_action", metavar="action")
+    subparsers.add_parser("run", help="run all due scheduled jobs")
+
+
+# ── realtime command ────────────────────────────────────────────
+
+
+def _cmd_realtime(args: argparse.Namespace) -> int:
+    """Introspect the realtime (WebSocket) layer of the application.
+
+    Lightweight, read-only: builds a READY application, attaches a
+    :class:`~betrayer.web.realtime_manager.RealtimeManager` and reports its
+    empty-but-ready state.  Does not open sockets or start a server.
+
+    Output::
+
+        {"success": true, "channels": [], "connections": 0}
+    """
+    from betrayer.bootstrap import Bootstrap
+    from betrayer.web.realtime_manager import RealtimeManager
+
+    application = Bootstrap(name=FRAMEWORK_NAME.lower()).build()
+    manager = RealtimeManager(application=application)
+    snapshot = manager.to_dict()
+    as_json = _as_json(args)
+    if as_json:
+        _print_json(
+            {
+                "success": True,
+                "channels": snapshot["channels"],
+                "connections": snapshot["connections"],
+            }
+        )
+    else:
+        print(f"Realtime manager: {len(snapshot['channels'])} channels, "
+              f"{snapshot['connections']} connections")
+        for ch in snapshot["channels"]:
+            print(f"  {ch['name']}: {ch['connections']} connections")
+    return 0
+
+
+def _configure_realtime(parser: argparse.ArgumentParser) -> None:
+    """``bet realtime`` has no subcommands (introspection only)."""
+    # No extra arguments: a single introspection call. The shared ``--json``
+    # flag (added by the parent parser) is honoured automatically.
+    _ = parser
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
@@ -1091,6 +1854,110 @@ def _configure_make(parser: argparse.ArgumentParser) -> None:
     )
 
 
+# ── discover ─────────────────────────────────────────────────────
+
+
+def _cmd_discover(args: argparse.Namespace) -> int:
+    """Discover Betrayer capabilities (LLM-facing knowledge surface).
+
+    Sub-commands:
+
+    ``bet discover``
+        List all capabilities (summary).
+
+    ``bet discover <name>``
+        Get full definition of a named capability.
+
+    ``bet discover --search <query>``
+        Search capabilities by keyword (name, purpose, category).
+
+    All sub-commands support ``--json`` for machine-readable output.
+    """
+    from betrayer.ai import discover
+
+    as_json = _as_json(args)
+    search_query = getattr(args, "search", None)
+    capability_name = getattr(args, "capability_name", None)
+
+    # --search takes precedence over positional name
+    if search_query:
+        results = discover.search(search_query)
+        if as_json:
+            _print_json({"success": True, "results": results, "query": search_query})
+            return 0
+        if not results:
+            print(f"No capabilities matched {search_query!r}")
+            return 0
+        print(f"Capabilities matching {search_query!r}:")
+        for cap in results:
+            print(f"  {cap['name']:25s}  {cap['category']:20s}  {cap['status']:12s}  {cap['purpose']}")
+        return 0
+
+    if capability_name:
+        try:
+            cap = discover.get(capability_name)
+        except LookupError as exc:
+            if as_json:
+                _print_json({"success": False, "error": str(exc)})
+                return 1
+            print(f"[FAIL] {exc}")
+            return 1
+
+        if as_json:
+            _print_json({"success": True, "capability": cap})
+            return 0
+
+        print(f"Capability: {cap['name']}")
+        print(f"  Purpose:  {cap['purpose']}")
+        print(f"  Category: {cap['category']}")
+        print(f"  Status:   {cap['status']}")
+        print(f"  Package:  {cap['package']}")
+        print(f"  Contract: {cap['contract'] or '(included in source)'}")
+        print(f"  Public API:")
+        for api in cap['public_api']:
+            print(f"    - {api}")
+        print(f"  Related capabilities: {', '.join(sorted(set(cap['uses'] + cap['used_by']))) or '(none)'}")
+        return 0
+
+    # Default: list all capabilities
+    result = discover.list()
+    if as_json:
+        _print_json({"success": True, "capabilities": result, "total": len(result)})
+        return 0
+
+    # Group by category for human-friendly output
+    by_category: dict[str, list[dict]] = {}
+    for cap in result:
+        by_category.setdefault(cap["category"], []).append(cap)
+
+    print(f"Betrayer Capabilities ({len(result)} total)")
+    print()
+    for cat in sorted(by_category):
+        print(f"  [{cat}]")
+        for cap in sorted(by_category[cat], key=lambda c: c["name"]):
+            print(f"    {cap['name']:25s}  {cap['status']:12s}  {cap['purpose']}")
+        print()
+    print("Use: bet discover <name>  -- get full capability definition")
+    print("Use: bet discover --search <query>  -- search capabilities")
+    return 0
+
+
+def _configure_discover(parser: argparse.ArgumentParser) -> None:
+    """Add ``discover`` sub-commands."""
+    parser.add_argument(
+        "capability_name",
+        nargs="?",
+        default=None,
+        help="capability name (e.g. pagination, authentication, cache)",
+    )
+    parser.add_argument(
+        "--search",
+        metavar="QUERY",
+        default=None,
+        help="search capabilities by name, purpose, category, or package",
+    )
+
+
 def _configure_manifest(parser: argparse.ArgumentParser) -> None:
     """Add ``manifest`` specific flags (registered with the command)."""
     parser.add_argument(
@@ -1324,6 +2191,10 @@ def build_command_registry() -> CommandRegistry:
     registry.register(Command("status", COMMAND_HELP["status"], _cmd_status))
     registry.register(Command("config", COMMAND_HELP["config"], _cmd_config))
     registry.register(Command("doctor", COMMAND_HELP["doctor"], _cmd_doctor))
+    registry.register(Command("check", COMMAND_HELP["check"], _cmd_check))
+    registry.register(
+        Command("debug", COMMAND_HELP["debug"], _cmd_debug, configure=_configure_debug)
+    )
     registry.register(Command("validate", COMMAND_HELP["validate"], _cmd_validate))
     registry.register(
         Command("manifest", COMMAND_HELP["manifest"], _cmd_manifest, configure=_configure_manifest)
@@ -1336,6 +2207,18 @@ def build_command_registry() -> CommandRegistry:
     )
     registry.register(
         Command("test", COMMAND_HELP["test"], _cmd_test, configure=_configure_test)
+    )
+    registry.register(
+        Command("queue", COMMAND_HELP["queue"], _cmd_queue, configure=_configure_queue)
+    )
+    registry.register(
+        Command("schedule", COMMAND_HELP["schedule"], _cmd_schedule, configure=_configure_schedule)
+    )
+    registry.register(
+        Command("realtime", COMMAND_HELP["realtime"], _cmd_realtime, configure=_configure_realtime)
+    )
+    registry.register(
+        Command("discover", COMMAND_HELP["discover"], _cmd_discover, configure=_configure_discover)
     )
     return registry
 

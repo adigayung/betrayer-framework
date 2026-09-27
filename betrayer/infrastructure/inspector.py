@@ -10,15 +10,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from betrayer.infrastructure.http_client import HTTPBackend, HTTPClient
-from betrayer.infrastructure.email import EmailBackend, EmailService
-from betrayer.infrastructure.notification import NotificationBackend, NotificationService
-from betrayer.infrastructure.scheduler import SchedulerBackend, Scheduler
-from betrayer.infrastructure.background_jobs import JobBackend, BackgroundJobService
-from betrayer.infrastructure.queue import QueueBackend, QueueService
+from betrayer.infrastructure.http_client import HttpClient
+from betrayer.infrastructure.email import EmailSender
+from betrayer.infrastructure.notification import Notifier
+from betrayer.infrastructure.scheduler import SimpleScheduler, Scheduler
+from betrayer.infrastructure.background_jobs import SimpleJobRunner, JobRunner
+from betrayer.infrastructure.queue import InMemoryQueue, QueueManager
 from betrayer.infrastructure.retry import RetryPolicy
-from betrayer.infrastructure.rate_limiter import RateLimiterBackend, RateLimiter
-from betrayer.infrastructure.health import HealthCheck, HealthRegistry
+from betrayer.infrastructure.rate_limiter import InMemoryRateLimiter, RateLimiter
+from betrayer.infrastructure.health import HealthCheck, HealthCheckRegistry
 
 
 class InfrastructureInspector:
@@ -41,14 +41,14 @@ class InfrastructureInspector:
 
     def __init__(
         self,
-        http_client: Optional[HTTPClient] = None,
-        email_service: Optional[EmailService] = None,
-        notification_service: Optional[NotificationService] = None,
-        scheduler: Optional[Scheduler] = None,
-        background_jobs: Optional[BackgroundJobService] = None,
-        queue_service: Optional[QueueService] = None,
-        rate_limiter: Optional[RateLimiter] = None,
-        health_registry: Optional[HealthRegistry] = None,
+        http_client: Optional[HttpClient] = None,
+        email_service: Optional[EmailSender] = None,
+        notification_service: Optional[Notifier] = None,
+        scheduler: Optional[SimpleScheduler] = None,
+        background_jobs: Optional[SimpleJobRunner] = None,
+        queue_service: Optional[QueueManager] = None,
+        rate_limiter: Optional[InMemoryRateLimiter] = None,
+        health_registry: Optional[HealthCheckRegistry] = None,
     ) -> None:
         self._http_client = http_client
         self._email_service = email_service

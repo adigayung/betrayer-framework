@@ -310,6 +310,9 @@ class Inspector:
             self._check("Package imports", self._check_imports),
             self._check("Application lifecycle", self._check_lifecycle),
             self._check("Runtime state", self._check_runtime_state),
+            self._check("Database", self._check_database),
+            self._check("Migration", self._check_migration),
+            self._check("Application bootstrap", self._check_bootstrap),
         ]
         ok = all(check["status"] == OK for check in checks)
         passed = sum(1 for check in checks if check["status"] == OK)
@@ -512,6 +515,89 @@ class Inspector:
                 f"independent contexts | probe state={snapshot['lifecycle_state']} | "
                 f"application bound={bound}"
             ),
+        )
+
+    def _check_database(self) -> dict:
+        """Check database configuration and connection."""
+        config = self._resolve_config()
+        if config is None:
+            return self._result(
+                "Database",
+                OK,
+                detail="no configuration (database not configured, skipping)",
+            )
+        driver = config.get("database.default.driver")
+        if driver is None:
+            return self._result(
+                "Database",
+                OK,
+                detail="no database driver configured (optional for non-DB apps)",
+            )
+        database = config.get("database.default.database")
+        return self._result(
+            "Database",
+            OK,
+            detail=f"driver={driver}, database={database}",
+        )
+
+    def _check_migration(self) -> dict:
+        """Check migration state."""
+        app = self._application
+        if app is None:
+            return self._result(
+                "Migration",
+                OK,
+                detail="no application bound; migration state not available",
+            )
+        container = getattr(app, "container", None)
+        if container is None:
+            return self._result(
+                "Migration",
+                OK,
+                detail="no container; migration state not available",
+            )
+        if hasattr(container, "has") and container.has("migration_registry"):
+            return self._result(
+                "Migration",
+                OK,
+                detail="migration registry is configured",
+            )
+        return self._result(
+            "Migration",
+            OK,
+            detail="no migration registry (no migrations configured)",
+        )
+
+    def _check_bootstrap(self) -> dict:
+        """Check application bootstrap state."""
+        app = self._application
+        if app is None:
+            return self._result(
+                "Application bootstrap",
+                FAIL,
+                reason="no application bound",
+                suggestion="build an application with Bootstrap before running doctor",
+            )
+        state = getattr(app, "state", None)
+        if state is None:
+            return self._result(
+                "Application bootstrap",
+                FAIL,
+                reason="application has no state attribute",
+                suggestion="check BetrayerApplication implementation",
+            )
+        state_value = getattr(state, "value", None)
+        if state_value in ("ready", "running"):
+            return self._result(
+                "Application bootstrap",
+                OK,
+                detail=f"application state={state_value}",
+            )
+        return self._result(
+            "Application bootstrap",
+            FAIL,
+            reason=f"application state is {state_value!r} (expected 'ready' or 'running')",
+            suggestion="call application.ready() or Bootstrap().build()",
         )
 
     # -- helpers -------------------------------------------------------

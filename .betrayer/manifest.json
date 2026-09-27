@@ -9,14 +9,23 @@
         "status",
         "config",
         "doctor",
+        "check",
+        "debug",
         "validate",
         "manifest",
         "create",
         "make",
-        "test"
+        "test",
+        "queue",
+        "schedule",
+        "realtime",
+        "discover"
     ],
     "packages": [
         "betrayer",
+        "betrayer.ai",
+        "betrayer.auth",
+        "betrayer.cache",
         "betrayer.cli",
         "betrayer.core",
         "betrayer.data",
@@ -24,6 +33,8 @@
         "betrayer.diagnostics",
         "betrayer.generators",
         "betrayer.infrastructure",
+        "betrayer.jobs",
+        "betrayer.ratelimit",
         "betrayer.runtime",
         "betrayer.web"
     ],

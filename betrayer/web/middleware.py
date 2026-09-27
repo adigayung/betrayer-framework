@@ -258,3 +258,146 @@ class WebMiddlewareRegistry:
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"<WebMiddlewareRegistry {self.names()}>"
+
+
+# ---------------------------------------------------------------------------
+# Pipeline execution
+# ---------------------------------------------------------------------------
+
+
+class WebPipeline:
+    """Per-request middleware execution pipeline.
+
+    Runs ``before_request`` hooks (in order), then ``after_request`` /
+    ``on_error`` hooks (reversed order), matching the documented contract in
+    this module.
+
+    Usage (from the adapter)::
+
+        pipeline = WebPipeline(middleware=mw_list, request=req, context=ctx)
+
+        # Synchronous handler:
+        result = pipeline.run(handler=lambda: route.handler(request, context))
+
+        # Asynchronous handler:
+        async def call_handler():
+            return await route.handler(request, context)
+        result = await pipeline.run_async(call_handler)
+    """
+
+    def __init__(
+        self,
+        *,
+        middleware: Sequence[Any],
+        request: Any,
+        context: Any,
+    ) -> None:
+        self._middleware = list(middleware)
+        self.request = request
+        self.context = context
+
+    # -- public API ----------------------------------------------------
+
+    def run(self, handler: Callable[[], Any]) -> Any:
+        """Execute the full pipeline::
+
+            before_request (in order) -> handler -> after_request (reversed)
+
+        If any ``before_request`` returns a non-``None`` value the handler is
+        skipped and that value is returned as the response.  ``after_request``
+        hooks run in the reversed order and may replace the response.
+
+        If an exception is raised the ``on_error`` hooks run (reversed order);
+        the first non-``None`` return becomes the response; if no hook handles
+        it the exception propagates.
+        """
+        try:
+            response = self._run_before()
+            if response is not None:
+                return response
+            response = handler()
+            return self._run_after(response)
+        except BaseException as exc:
+            handled = self._run_error(exc)
+            if handled is not None:
+                return handled
+            raise
+
+    async def run_async(self, handler: Callable[[], Any]) -> Any:
+        """Async variant of :meth:`run` for async route handlers.
+
+        ``handler`` should be an async callable.  The before/after/on_error
+        hooks are run synchronously (they are not expected to be async in the
+        current design).
+        """
+        try:
+            response = self._run_before()
+            if response is not None:
+                return response
+            response = await handler()
+            return self._run_after(response)
+        except BaseException as exc:
+            handled = self._run_error(exc)
+            if handled is not None:
+                return handled
+            raise
+
+    # -- hook execution -------------------------------------------------
+
+    def _run_before(self) -> Any:
+        """Call ``before_request(request, context)`` on each middleware.
+
+        Returns the first non-``None`` response (which short-circuits) or
+        ``None`` to continue.
+        """
+        for mw in self._middleware:
+            hook = getattr(mw, "before_request", None)
+            if not callable(hook):
+                continue
+            if not getattr(mw, "enabled", True):
+                continue
+            result = hook(self.request, self.context)
+            if result is not None:
+                return result
+        return None
+
+    def _run_after(self, response: Any) -> Any:
+        """Call ``after_request(request, response, context)`` in reversed order.
+
+        Returns the (possibly replaced) response.
+        """
+        for mw in reversed(self._middleware):
+            hook = getattr(mw, "after_request", None)
+            if not callable(hook):
+                continue
+            if not getattr(mw, "enabled", True):
+                continue
+            try:
+                result = hook(self.request, response, self.context)
+                if result is not None:
+                    response = result
+            except BaseException:  # noqa: BLE001 - middleware error is not fatal
+                pass
+        return response
+
+    def _run_error(self, error: BaseException) -> Any:
+        """Call ``on_error(request, error, context)`` in reversed order.
+
+        Returns the first non-``None`` response (error handled) or ``None``
+        to let the exception propagate.
+        """
+        handled: Any = None
+        for mw in reversed(self._middleware):
+            hook = getattr(mw, "on_error", None)
+            if not callable(hook):
+                continue
+            if not getattr(mw, "enabled", True):
+                continue
+            try:
+                result = hook(self.request, error, self.context)
+                if result is not None:
+                    handled = result
+                    break
+            except BaseException:  # noqa: BLE001 - middleware error is not fatal
+                pass
+        return handled

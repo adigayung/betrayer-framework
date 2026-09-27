@@ -312,6 +312,38 @@ class Query:
         """Return a new query skipping ``count`` rows."""
         return self._replace(offset=int(count))
 
+    def paginate(self, page: int = 1, per_page: int = 20) -> Dict[str, Any]:
+        """Return one page as ``{"items": [...], "total": int}`` (Task 16.3).
+
+        Minimal page-based pagination on top of the existing ``limit`` /
+        ``offset`` / ``count`` / ``get`` surface -- no new abstraction::
+
+            result = Query("users", database=manager).paginate(page=2, per_page=20)
+            rows, total = result["items"], result["total"]
+
+        ``page`` must be >= 1 and ``per_page`` >= 1; ``total`` is the
+        count of **all** matching rows (ignoring limit/offset) so callers can
+        compute ``total_pages``.
+        """
+        if not isinstance(page, int) or isinstance(page, bool) or page < 1:
+            raise QueryError(
+                message="paginate() requires page >= 1",
+                stage="build",
+                context={"page": page},
+            )
+        if not isinstance(per_page, int) or isinstance(per_page, bool) or per_page < 1:
+            raise QueryError(
+                message="paginate() requires per_page >= 1",
+                stage="build",
+                context={"per_page": per_page},
+            )
+        total = self.count()
+        items = self._replace(
+            limit=per_page,
+            offset=(page - 1) * per_page,
+        ).get()
+        return {"items": items, "total": total}
+
     # ── terminal operations (SELECT family) ──────────────────────────
 
     def get(self, columns: Optional[Sequence[str]] = None) -> List[Any]:

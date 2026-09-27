@@ -16,13 +16,14 @@ Every public symbol is importable from ``betrayer.infrastructure`` for convenien
     from betrayer.infrastructure import (
         HttpClient,
         EmailSender,
-        NotificationManager,
-        DefaultScheduler,
-        JobRunner,
+        Notification,
+        Notifier,
+        SimpleScheduler,
+        SimpleJobRunner,
         InMemoryQueue,
         RetryPolicy,
         InMemoryRateLimiter,
-        HealthRegistry,
+        HealthCheckRegistry,
     )
 """
 
@@ -30,7 +31,6 @@ from __future__ import annotations
 
 # HTTP client
 from betrayer.infrastructure.http_client import (
-    AbstractHttpClient,
     HttpClientConfig,
     HttpClientResponse,
     HttpClient,
@@ -47,56 +47,57 @@ from betrayer.infrastructure.email import (
 
 # Notification
 from betrayer.infrastructure.notification import (
-    AbstractNotificationChannel,
     Notification,
-    NotificationManager,
+    Notifier,
+    NotificationBackend,
+    LogNotificationBackend,
 )
 
 # Scheduler
 from betrayer.infrastructure.scheduler import (
-    AbstractSchedulerBackend,
-    DefaultScheduler,
-    ScheduledJob,
     Scheduler,
+    SimpleScheduler,
+    SchedulerConfig,
+    ScheduleTask,
+    ScheduledJob,
 )
 
 # Background jobs
 from betrayer.infrastructure.background_jobs import (
-    AbstractJobRunner,
-    BackgroundJob,
-    InMemoryJobRunner,
-    JobResult,
+    JobState,
+    Job,
+    BackgroundJobConfig,
     JobRunner,
+    SimpleJobRunner,
 )
 
 # Queue
 from betrayer.infrastructure.queue import (
-    AbstractQueueBackend,
+    QueueBackend,
     InMemoryQueue,
     QueueMessage,
-    Queue,
+    QueueManager,
 )
 
 # Retry
 from betrayer.infrastructure.retry import (
-    RetryHandler,
     RetryPolicy,
+    RetryState,
     retry,
 )
 
 # Rate limiter
 from betrayer.infrastructure.rate_limiter import (
-    AbstractRateLimiter,
-    InMemoryRateLimiter,
-    RateLimitRule,
     RateLimiter,
+    InMemoryRateLimiter,
+    RateLimitExceeded,
 )
 
 # Health check
 from betrayer.infrastructure.health import (
-    AbstractHealthCheck,
+    HealthCheck,
     HealthCheckResult,
-    HealthRegistry,
+    HealthCheckRegistry,
     HealthStatus,
 )
 
@@ -122,7 +123,6 @@ from betrayer.infrastructure.exceptions import (
 
 __all__ = [
     # HTTP client
-    "AbstractHttpClient",
     "HttpClientConfig",
     "HttpClientResponse",
     "HttpClient",
@@ -133,38 +133,39 @@ __all__ = [
     "EmailSender",
     "SmtpEmailBackend",
     # Notification
-    "AbstractNotificationChannel",
     "Notification",
-    "NotificationManager",
+    "Notifier",
+    "NotificationBackend",
+    "LogNotificationBackend",
     # Scheduler
-    "AbstractSchedulerBackend",
-    "DefaultScheduler",
-    "ScheduledJob",
     "Scheduler",
+    "SimpleScheduler",
+    "SchedulerConfig",
+    "ScheduleTask",
+    "ScheduledJob",
     # Background jobs
-    "AbstractJobRunner",
-    "BackgroundJob",
-    "InMemoryJobRunner",
-    "JobResult",
+    "JobState",
+    "Job",
+    "BackgroundJobConfig",
     "JobRunner",
+    "SimpleJobRunner",
     # Queue
-    "AbstractQueueBackend",
+    "QueueBackend",
     "InMemoryQueue",
     "QueueMessage",
-    "Queue",
+    "QueueManager",
     # Retry
-    "RetryHandler",
     "RetryPolicy",
+    "RetryState",
     "retry",
     # Rate limiter
-    "AbstractRateLimiter",
-    "InMemoryRateLimiter",
-    "RateLimitRule",
     "RateLimiter",
+    "InMemoryRateLimiter",
+    "RateLimitExceeded",
     # Health check
-    "AbstractHealthCheck",
+    "HealthCheck",
     "HealthCheckResult",
-    "HealthRegistry",
+    "HealthCheckRegistry",
     "HealthStatus",
     # Inspector
     "InfrastructureInspector",

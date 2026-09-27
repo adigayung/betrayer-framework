@@ -159,6 +159,15 @@ class Route:
 
     __slots__ = ("method", "path", "endpoint", "handler", "module", "middleware", "metadata")
 
+    #: When ``True`` the :class:`~betrayer.auth.AuthorizationMiddleware`
+    #: runs an authorization check before this endpoint (default ``False``).
+    authorization_required: bool = False
+    #: Action passed to the authorizer (default ``"access"`` when
+    #: :attr:`authorization_required` is set).
+    authorization_action: Optional[str] = None
+    #: Optional path parameter name whose value is passed as ``resource``.
+    authorization_resource_key: Optional[str] = None
+
     def __init__(
         self,
         method: str,
@@ -197,6 +206,12 @@ class Route:
             "module": self.module,
             "middleware": list(self.middleware),
             "metadata": dict(self.metadata),
+            "authorization_required": bool(self.authorization_required),
+            "authorization_action": self.authorization_action,
+            "authorization_resource_key": self.authorization_resource_key,
+            "rate_limit": self.metadata.get("rate_limit").to_dict()
+            if self.metadata.get("rate_limit") is not None
+            else None,
         }
 
     describe = to_dict

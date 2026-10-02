@@ -252,11 +252,23 @@ class ApiResponse:
         details: Optional[Any] = None,
         data: Any = None,
         headers: Optional[Dict[str, str]] = None,
+        structured_error: Optional[Dict[str, Any]] = None,
     ) -> Response:
-        """JSON error response following the same envelope."""
+        """JSON error response following the same envelope.
+
+        ``structured_error`` enriches the existing API error shape with the
+        canonical LLM contract while retaining backwards compatibility for
+        clients that only consume ``code``/``message``/``details``.
+        """
         error: Dict[str, Any] = {"code": str(code), "message": str(message)}
+        if structured_error:
+            for key in ("error_type", "location", "component", "cause", "suggested_context", "traceback", "command"):
+                if key in structured_error:
+                    error[key] = structured_error[key]
         if details is not None:
             error["details"] = details
+        elif structured_error and "details" in structured_error:
+            error["details"] = structured_error["details"]
         return Response.json(
             ApiResponse.payload(success=False, data=data, error=error),
             status=status,

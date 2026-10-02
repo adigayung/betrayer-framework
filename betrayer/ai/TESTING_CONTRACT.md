@@ -67,6 +67,10 @@ The layer flags (`--unit`, `--integration`, etc.) discover tests by matching the
 bet test [test_path] [--unit] [--integration] [--functional] [--smoke] [--json]
 ```
 
+```
+bet test affected [--run] [--list] [--json] [test_path...]
+```
+
 ### Examples
 
 ```bash
@@ -87,6 +91,50 @@ bet test --json
 
 # Structured JSON for a layer
 bet test --smoke --json
+
+# Affected tests: detect git-changed files, map to tests, run them
+bet test affected              # auto-detect changes, run affected tests
+bet test affected --list       # list affected tests only (no run)
+bet test affected --run        # same as default (explicit)
+bet test affected --json       # structured JSON (no run, inspect first)
+bet test affected tests/test_foo.py  # override detection, run specific test
+```
+
+### Exit codes
+
+| Exit code | Meaning |
+|-----------|---------|
+| 0 | All tests passed |
+| 1 | One or more tests failed |
+| Other | pytest internal error (syntax error, missing dependency, etc.) |
+
+### Affected Tests Output (JSON)
+
+```json
+{
+  "success": true,
+  "changed_files": ["betrayer/cache/policy.py"],
+  "affected_tests": ["tests/test_cache.py"],
+  "affected_count": 1,
+  "determined": true,
+  "reasons": {
+    "tests/test_cache.py": ["imports/is betrayer.cache.policy"]
+  },
+  "note": null
+}
+```
+
+When no affected test can be determined:
+
+```json
+{
+  "success": true,
+  "changed_files": [],
+  "affected_tests": [],
+  "affected_count": 0,
+  "determined": false,
+  "note": "no affected tests could be determined"
+}
 ```
 
 ### Exit codes

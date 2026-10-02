@@ -67,19 +67,27 @@ class BetrayerError(Exception):
         return " ".join(part for part in parts if part).strip()
 
     def to_dict(self) -> dict:
-        """Machine readable representation (safe for JSON output)."""
-        return {
-            "code": self.code,
-            "component": self.component,
-            "stage": self.stage,
-            "message": self.message,
-            "cause": (
-                None
-                if self.cause is None
-                else f"{type(self.cause).__name__}: {self.cause}"
-            ),
-            "context": dict(self.context),
-        }
+        """Machine readable representation (safe for JSON output).
+
+        Returns the canonical StructuredError contract (see
+        :mod:`betrayer.core.error_contract`) so LLM consumers see a
+        consistent shape across CLI --json output, API error responses,
+        and test failures.  Legacy keys (``code``, ``component``,
+        ``stage``, ``context``) are kept alongside the structured fields
+        for backwards compatibility with existing consumers such as
+        ``Inspector.status()`` and ``Lifecycle.describe()``.
+        """
+        # Import lazily to avoid circular dependency at module load time
+        from betrayer.core.error_contract import StructuredError
+
+        payload = StructuredError.from_exception(self).to_dict()
+
+        # Legacy mirrors (kept stable for existing consumers)
+        payload["code"] = self.code
+        payload["component"] = self.component
+        payload["stage"] = self.stage
+        payload["context"] = dict(self.context)
+        return payload
 
 
 class BootstrapError(BetrayerError):

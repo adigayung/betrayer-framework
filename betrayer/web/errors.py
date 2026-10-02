@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from betrayer.core.error_contract import format_error_for_llm
 from betrayer.web.exceptions import (
     BadRequestError,
     ConflictError,

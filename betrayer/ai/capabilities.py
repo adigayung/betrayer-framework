@@ -598,6 +598,10 @@ CAPABILITIES: list[CapabilityDef] = [
             "bet test --functional",
             "bet test --smoke",
             "bet test --json",
+            "bet test affected",
+            "bet test affected --run",
+            "bet test affected --list",
+            "bet test affected --json",
         ],
         "contract": "TESTING_CONTRACT.md",
         "package": "betrayer (CLI)",
@@ -634,13 +638,17 @@ CAPABILITIES: list[CapabilityDef] = [
     },
     {
         "name": "generator",
-        "purpose": "Code generation for modules, resources, services, CRUD, migrations, and extensions.",
+        "purpose": "Code generation for modules, resources, services, CRUD, migrations, extensions, features, and realtime slices.",
         "description": (
             "The ``bet make`` CLI command generates canonical project artifacts: "
             "``bet make module <name>``, ``bet make resource <name>``, "
             "``bet make service <name>``, ``bet make crud <name>`` (model + repo + service "
             "+ routes + module), ``bet make migration <name>``, and "
-            "``bet make extension <name>``.  All generators support ``--json`` and ``--force``."
+            "``bet make extension <name>``.  Vertical slices: ``bet make feature <name>`` "
+            "(model + schema? + repo + service + routes + tests + module; flags: ``--minimal``, "
+            "``--full``, ``--with-schema``) and ``bet make websocket <name>`` (realtime "
+            "channel + service + EventBus wiring; ``--events``).  All generators support "
+            "``--json`` and ``--force``."
         ),
         "category": "generator",
         "status": "stable",
@@ -651,11 +659,13 @@ CAPABILITIES: list[CapabilityDef] = [
             "bet make crud",
             "bet make migration",
             "bet make extension",
+            "bet make feature",
+            "bet make websocket",
             "bet create",
         ],
         "contract": None,
         "package": "betrayer.generators",
-        "uses": ["application", "resource", "database"],
+        "uses": ["application", "resource", "database", "realtime"],
         "used_by": [],
         "cli_commands": ["make", "create"],
         "example": "bet make crud product",

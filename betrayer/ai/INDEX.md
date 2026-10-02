@@ -288,6 +288,80 @@ lifecycle, and registry. It is passed to subsystems — not a global singleton.
 Every command supports `--json` (valid JSON, sorted keys) and returns a real
 exit code: `0` = success, non-zero = failure.
 
+## Code Generation (`bet make` / `bet create`)
+
+`bet make` scaffolds canonical artifacts.  Targets:
+
+| Target      | Produces | Usage |
+|-------------|----------|-------|
+| `module`    | Application module skeleton | `bet make module <name>` |
+| `resource`  | model + repository + routes + module | `bet make resource <name>` |
+| `service`   | service + module | `bet make service <name>` |
+| `crud`      | model + repository + service + routes + module | `bet make crud <name>` |
+| `migration` | One migration file | `bet make migration <name>` |
+| `extension` | Extension skeleton | `bet make extension <name>` |
+| `feature`   | Vertical slice (see below) | `bet make feature <name>` |
+| `websocket` | Realtime slice (see below) | `bet make websocket <name>` |
+
+`bet create <project>` scaffolds a full project.  All generators support
+`--force` (overwrite) and `--json` (machine-readable output).
+
+### Vertical-slice feature (`bet make feature`)
+
+One command creates a complete, importable feature package so an LLM fills in
+business logic instead of deciding structure:
+
+```
+bet make feature orders                       # default: model+repo+service+routes+tests+module
+bet make feature orders --minimal             # model+repo+module
+bet make feature orders --full                # + schema
+bet make feature orders --with-schema         # add just the schema
+```
+
+Generated structure (only the requested components are created — never more):
+
+```
+orders/
+  __init__.py      public API
+  models.py        OrdersModel (Model subclass)
+  schema.py        OrdersSchema (validation Schema) -- when requested
+  repository.py    OrdersRepository (Repository subclass)
+  service.py       OrdersService (delegates CRUD to the repository)
+  routes.py        REST endpoints + register_routes()
+  module.py        OrdersFeatureModule (registers repository + service)
+  tests/           unit + integration placeholders
+```
+
+Register on the application:
+
+```python
+from orders import OrdersFeatureModule
+app.modules.register(OrdersFeatureModule)
+```
+
+### Realtime slice (`bet make websocket`)
+
+Creates a realtime feature wired to the existing `RealtimeManager` /
+`Channel` / EventBus (no second realtime system):
+
+```
+bet make websocket chat                         # event: chat.created
+bet make websocket chat --events msg.sent user.online
+```
+
+```
+chat/
+  __init__.py      public API
+  channels.py      CHANNEL="/chat" + EVENT_ROUTES mapping
+  service.py       ChatRealtimeService (broadcast/connect over the manager)
+  module.py        ChatRealtimeModule (registers realtime_manager + service,
+                   subscribes the EventBus -> channel)
+  tests/           unit test placeholder
+```
+
+Both outputs include the component/file list after generation (text) and in
+JSON with `--json`.
+
 ## Diagnostics & Developer Tools
 
 Betrayer provides a canonical diagnostics subsystem for inspection, tracing,

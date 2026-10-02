@@ -28,6 +28,8 @@ from betrayer.generators.module import ModuleGenerator, validate_module_name
 from betrayer.generators.project import ProjectGenerator
 from betrayer.generators.resource import ResourceGenerator, validate_resource_name
 from betrayer.generators.service import ServiceGenerator, validate_service_name
+from betrayer.generators.feature import FeatureGenerator, validate_feature_name
+from betrayer.generators.websocket import WebsocketGenerator, validate_websocket_name
 
 __all__ = [
     "BaseGenerator",
@@ -52,4 +54,8 @@ __all__ = [
     "validate_migration_name",
     "ExtensionGenerator",
     "validate_extension_name",
+    "FeatureGenerator",
+    "validate_feature_name",
+    "WebsocketGenerator",
+    "validate_websocket_name",
 ]

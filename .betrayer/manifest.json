@@ -19,7 +19,10 @@
         "queue",
         "schedule",
         "realtime",
-        "discover"
+        "discover",
+        "inspect",
+        "context",
+        "impact"
     ],
     "packages": [
         "betrayer",

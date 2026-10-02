@@ -30,6 +30,7 @@ from betrayer.cli.registry import Command, CommandError, CommandRegistry
 from betrayer.core.config import Config, is_secret_key
 from betrayer.core.environment import Environment
 from betrayer.core.exceptions import BetrayerError
+from betrayer.core.error_contract import format_cli_error, format_test_failure
 from betrayer.core.lifecycle import Lifecycle, LifecycleState
 from betrayer.core.meta import (
     ARCHITECTURE_VERSION,
@@ -46,6 +47,7 @@ from betrayer.diagnostics.store import (
     CHECK_STATUS_WARNING,
     DiagnosticsStore,
 )
+from betrayer.ai import intelligence
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 MANIFEST_PATH: Path = PROJECT_ROOT / ".betrayer" / "manifest.json"
@@ -67,6 +69,9 @@ COMMAND_HELP = {
         "create": "create a new Betrayer application project",
         "make": "generate project artifacts (e.g. a new module or resource)",
         "discover": "discover Betrayer capabilities (list, get <name>, search <query>)",
+    "inspect": "inspect project structure and entities (project, module, route, service, model, ...)",
+    "context": "show concise context (files, symbols, dependencies, dependents, tests) for a target",
+    "impact": "show which project parts a change to a target may affect",
         "queue": "inspect or run the job queue (use --json for machine output)",
         "schedule": "inspect or run due scheduled jobs (use --json for machine output)",
         "realtime": "introspect the realtime (WebSocket) layer (use --json for machine output)",
@@ -1817,6 +1822,162 @@ def _cmd_make_extension(args: argparse.Namespace) -> int:
 _MAKE_HANDLERS["extension"] = _cmd_make_extension
 
 
+def _cmd_make_feature(args: argparse.Namespace) -> int:
+    """Create a new vertical-slice feature in the current directory.
+
+    Like ``create`` this does not build a READY application first: it generates
+    files on disk.  Controlled failures (invalid name, existing feature) raise
+    :class:`CommandError` and return the framework CLI failure exit code.
+    """
+    from betrayer.generators.feature import FeatureGenerator
+
+    as_json = _as_json(args)
+    name = args.feature_name
+    force = bool(getattr(args, "force", False))
+    minimal = bool(getattr(args, "minimal", False))
+    full = bool(getattr(args, "full", False))
+    with_schema = bool(getattr(args, "with_schema", False))
+
+    # Determine component flags with proper defaults:
+    if minimal:
+        with_model = True
+        with_schema = False
+        with_repository = True
+        with_service = False
+        with_routes = False
+        with_tests = False
+    elif full:
+        with_model = True
+        with_schema = True
+        with_repository = True
+        with_service = True
+        with_routes = True
+        with_tests = True
+    else:
+        # Default feature: model + repository + service + routes + tests + module
+        with_model = True
+        with_repository = True
+        with_service = True
+        with_routes = True
+        with_tests = True
+        # schema defaults to False, but --with-schema can enable it
+    try:
+        generator = FeatureGenerator(
+            name=name,
+            output_dir=Path.cwd(),
+            overwrite=force,
+            with_model=with_model,
+            with_schema=with_schema,
+            with_repository=with_repository,
+            with_service=with_service,
+            with_routes=with_routes,
+            with_tests=with_tests,
+            minimal=minimal,
+            full=full,
+        )
+    except Exception as exc:  # noqa: BLE001 - name validation failure
+        raise CommandError(str(exc)) from exc
+    try:
+        output = generator.generate()
+    except Exception as exc:  # noqa: BLE001 - existing feature, write failure
+        raise CommandError(str(exc)) from exc
+    if not output.success:
+        detail = "; ".join(
+            f"{e['path']}: {e['message']}" for e in output.errors
+        )
+        raise CommandError(f"failed to create feature: {detail}")
+    if as_json:
+        _print_json(
+            {
+                "feature": generator.feature_name,
+                "path": str(generator.target),
+                "components": sorted(list(generator.components)),
+                "model_class": generator.model_class_name if generator.has("model") else None,
+                "schema_class": generator.schema_class_name if generator.has("schema") else None,
+                "repository_class": generator.repository_class_name if generator.has("repository") else None,
+                "service_class": generator.service_class_name if generator.has("service") else None,
+                "module_class": generator.module_class_name,
+                "created": output.created,
+                "updated": output.updated,
+                "skipped": output.skipped,
+            }
+        )
+        return 0
+    print(f"Created feature: {generator.feature_name} ({generator.target})")
+    for relative in output.created:
+        print(f"  created {relative}")
+    for relative in output.updated:
+        print(f"  updated {relative}")
+    print("Components:", ", ".join(sorted(generator.components)))
+    print("Register it in your application with:")
+    print(f"  app.modules.register({generator.module_class_name})")
+    return 0
+
+
+_MAKE_HANDLERS["feature"] = _cmd_make_feature
+
+
+def _cmd_make_websocket(args: argparse.Namespace) -> int:
+    """Create a new realtime (WebSocket) feature in the current directory.
+
+    Like ``create`` this does not build a READY application first: it generates
+    files on disk.  Controlled failures (invalid name, existing websocket) raise
+    :class:`CommandError` and return the framework CLI failure exit code.
+    """
+    from betrayer.generators.websocket import WebsocketGenerator
+
+    as_json = _as_json(args)
+    name = args.websocket_name
+    force = bool(getattr(args, "force", False))
+    events = tuple(getattr(args, "events", []))
+    try:
+        generator = WebsocketGenerator(
+            name=name,
+            output_dir=Path.cwd(),
+            overwrite=force,
+            events=events if events else None,
+        )
+    except Exception as exc:  # noqa: BLE001 - name validation failure
+        raise CommandError(str(exc)) from exc
+    try:
+        output = generator.generate()
+    except Exception as exc:  # noqa: BLE001 - existing websocket, write failure
+        raise CommandError(str(exc)) from exc
+    if not output.success:
+        detail = "; ".join(
+            f"{e['path']}: {e['message']}" for e in output.errors
+        )
+        raise CommandError(f"failed to create websocket feature: {detail}")
+    if as_json:
+        _print_json(
+            {
+                "websocket": generator.feature_name,
+                "path": str(generator.target),
+                "channel": generator.channel_name,
+                "events": list(generator.events),
+                "service_class": generator.service_class_name,
+                "module_class": generator.module_class_name,
+                "created": output.created,
+                "updated": output.updated,
+                "skipped": output.skipped,
+            }
+        )
+        return 0
+    print(f"Created websocket feature: {generator.feature_name} ({generator.target})")
+    for relative in output.created:
+        print(f"  created {relative}")
+    for relative in output.updated:
+        print(f"  updated {relative}")
+    print(f"Channel: {generator.channel_name}")
+    print("Events:", ", ".join(generator.events))
+    print("Register it in your application with:")
+    print(f"  app.modules.register({generator.module_class_name})")
+    return 0
+
+
+_MAKE_HANDLERS["websocket"] = _cmd_make_websocket
+
+
 def _cmd_make(args: argparse.Namespace) -> int:
     """Dispatch ``bet make <target>`` to the matching generator command."""
     target = getattr(args, "make_target", None)
@@ -1930,6 +2091,160 @@ def _configure_make(parser: argparse.ArgumentParser) -> None:
     extension_parser.add_argument(
         "--json", action="store_true", help="emit machine readable JSON output"
     )
+    feature_parser = subparsers.add_parser(
+        "feature",
+        help="create a complete vertical-slice feature (model + repo + service + routes + tests)",
+    )
+    feature_parser.add_argument(
+        "feature_name",
+        help="new feature name (letters, digits, '-' and '_'; must start with a letter)",
+    )
+    feature_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing feature instead of failing",
+    )
+    feature_parser.add_argument(
+        "--json", action="store_true", help="emit machine readable JSON output"
+    )
+    feature_parser.add_argument(
+        "--minimal",
+        action="store_true",
+        help="minimal feature: only model + repository + module",
+    )
+    feature_parser.add_argument(
+        "--full",
+        action="store_true",
+        help="full feature: model + schema + repository + service + routes + tests + module",
+    )
+    feature_parser.add_argument(
+        "--with-schema",
+        action="store_true",
+        help="include validation schema (default: False)",
+    )
+    websocket_parser = subparsers.add_parser(
+        "websocket",
+        help="create a realtime (WebSocket) feature (channel + service + event wiring)",
+    )
+    websocket_parser.add_argument(
+        "websocket_name",
+        help="new websocket feature name (letters, digits, '-' and '_'; must start with a letter)",
+    )
+    websocket_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite an existing websocket feature instead of failing",
+    )
+    websocket_parser.add_argument(
+        "--json", action="store_true", help="emit machine readable JSON output"
+    )
+    websocket_parser.add_argument(
+        "--events",
+        nargs="+",
+        default=[],
+        help="event names that should route to this channel (default: '<feature>.created')",
+    )
+
+
+# ── inspect / context / impact ──────────────────────────────────────────
+
+
+def _cmd_inspect(args: argparse.Namespace) -> int:
+    """Inspect the project and its Betrayer entities.
+
+    Outputs:
+      - ``<target>`` optional: limit to a project entity (module, service,
+        model, route, resource, config, etc.)
+
+    Without a target a deterministic, machine-readable overview of the
+    project is produced (capabilities, commands, packages, files).
+    """
+    as_json = _as_json(args)
+    data = intelligence.inspect(args.target)
+    if as_json:
+        _print_json(data)
+        return 0
+    if args.target is None:
+        print("Betrayer Project Intelligence — Inspect")
+        print()
+        print(f"Project root: {data['project_root']}")
+        print(f"Total Python files: {data['total_files']}")
+        meta = data.get("metadata", {})
+        if "manifest" in meta:
+            print(f"Framework: {meta['manifest'].get('framework')}")
+            print(f"Version: {meta['manifest'].get('version')}")
+            print(f"Packages: {len(meta['manifest'].get('packages', []))}")
+            print(f"Commands: {len(meta['manifest'].get('commands', []))}")
+        if "architecture" in meta:
+            layers = meta["architecture"].get("layers", [])
+            print(f"Architecture layers: {len(layers)}")
+    else:
+        print(f"Inspect: {args.target}")
+        print(f"Files: {data['total_files']}")
+        for f in data["files"]:
+            print(f"  {f['file']}")
+    return 0
+
+
+def _cmd_context(args: argparse.Namespace) -> int:
+    """Show concise context for a target entity/route/module.
+
+    Returns relevant files, symbols, dependencies, dependents, and
+    related tests so an LLM can understand scope without extra exploration.
+    """
+    as_json = _as_json(args)
+    data = intelligence.context(args.target)
+    if as_json:
+        _print_json(data)
+        return 0
+    print(f"Context: {args.target}")
+    print()
+    print(f"Dependencies ({len(data['dependencies'])}): {', '.join(data['dependencies']) or 'none'}")
+    print(f"Dependents ({len(data['dependents'])}): {', '.join(data['dependents']) or 'none'}")
+    print(f"Related tests ({len(data['related_tests'])}): {', '.join(data['related_tests']) or 'none'}")
+    print()
+    print("Relevant files:")
+    for f in data["files"]:
+        syms = ", ".join(f.get("symbols", []))[:80]
+        print(f"  {f['file']}: {syms}")
+    return 0
+
+
+def _cmd_impact(args: argparse.Namespace) -> int:
+    """Show which project parts may be affected by changing a target."""
+    as_json = _as_json(args)
+    data = intelligence.impact(args.target)
+    if as_json:
+        _print_json(data)
+        return 0
+    print(f"Impact analysis: {args.target}")
+    print()
+    print(f"Source files ({len(data['source_files'])}): {', '.join(data['source_files']) or 'none'}")
+    print(f"Dependencies ({len(data['dependencies'])}): {', '.join(data['dependencies']) or 'none'}")
+    print(f"Potentially affected ({len(data['potentially_affected'])}):")
+    for p in data["potentially_affected"]:
+        print(f"  {p}")
+    return 0
+
+
+def _configure_inspect(parser: argparse.ArgumentParser) -> None:
+    """Add ``inspect`` arguments."""
+    parser.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="entity to inspect (e.g. module, service, model, route, config)",
+    )
+
+
+def _configure_context(parser: argparse.ArgumentParser) -> None:
+    """Add ``context`` arguments."""
+    parser.add_argument("target", help="entity, route, module, or feature name")
+
+
+def _configure_impact(parser: argparse.ArgumentParser) -> None:
+    """Add ``impact`` arguments."""
+    parser.add_argument("target", help="entity, file, module, or feature name")
 
 
 # ── discover ─────────────────────────────────────────────────────
@@ -2062,12 +2377,198 @@ _TEST_FILE_PATTERNS = {
 }
 
 
-def _cmd_test(args: argparse.Namespace) -> int:
-    """Run tests with pytest and produce LLM-friendly output.
+def _run_affected_tests(args: argparse.Namespace, extra: list[str], list_only: bool = False) -> int:
+    """Implement ``bet test affected``.
 
-    Delegates to ``pytest`` under the hood; never reimplements a test runner.
+    Flow: changed files -> dependency/impact analysis -> affected tests ->
+    selected run -> structured result.
+
+    * default          -- detect, report the selected tests, then run them
+    * ``--list``       -- only list the affected tests (cheap triage step)
+    * ``--run``        -- explicitly run the selected subset
+    * ``--json``       -- machine readable output for an LLM
+    * explicit paths   -- override detection and run exactly those paths
+
+    When no affected test can be determined the command reports it
+    explicitly (``determined: false``) and exits 0 -- never a traceback.
     """
     as_json = _as_json(args)
+
+    # Map changed files (auto-detected from ``git``) to candidate tests.
+    info = intelligence.affected_tests(changed=None)
+
+    if not info["affected_tests"]:
+        payload = dict(info)
+        payload["command"] = "bet test affected"
+        payload["executed"] = False
+        if as_json:
+            _print_json(payload)
+            return 0
+        print("AFFECTED_TESTS: NONE")
+        print(f"changed files: {len(info['changed_files'])}")
+        print("note: no affected tests could be determined from the current changes")
+        print("action: run the full suite with 'bet test' or pass explicit paths")
+        return 0
+
+    # Only list? (explicit --list triage, or --json which a caller inspects first)
+    if list_only:
+        payload = dict(info)
+        payload["command"] = "bet test affected"
+        payload["executed"] = False
+        if as_json:
+            _print_json(payload)
+            return 0
+        _print_affected(info)
+        return 0
+
+    # Select which tests to run: explicit paths override auto-detection.
+    selection = list(extra) if extra else list(info["affected_tests"])
+    pytest_args = list(selection)
+    pytest_args.extend(["-v", "--tb=short", "--no-header", "--no-summary"])
+    if not as_json:
+        _print_affected(info)
+        print()
+    return _pytest_run(pytest_args, as_json, affected=info)
+
+
+def _print_affected(info: dict) -> None:
+    """Human-readable affected-test listing."""
+    print(f"Affected tests for {len(info['changed_files'])} changed file(s):")
+    for f in info["changed_files"]:
+        print(f"  change: {f}")
+    print()
+    print(f"Affected tests ({info['affected_count']}):")
+    for t in info["affected_tests"]:
+        print(f"  - {t}")
+
+
+def _pytest_run(pytest_args: list[str], as_json: bool, affected: Optional[dict] = None) -> int:
+    """Run pytest with a structured collector (shared with ``_cmd_test``)."""
+    # Capture output.
+    import pytest as _pytest
+    import time as _time
+
+    collector: Any
+    start_time = _time.time()
+
+    class _ResultCollector:
+        def __init__(self) -> None:
+            self.passed: list[dict] = []
+            self.failed: list[dict] = []
+            self.skipped: list[dict] = []
+
+        @staticmethod
+        def pytest_report_header() -> list[str]:
+            return []
+
+        def pytest_runtest_logreport(self, report: Any) -> None:
+            if report.when != "call" and (
+                report.when != "setup" or report.failed
+            ):
+                return
+            node_id = report.nodeid
+            if "::" not in node_id:
+                return
+            parts = node_id.split("::")
+            test_name = parts[-1]
+            test_file = parts[0] if len(parts) > 1 else node_id
+            test_class = parts[-2] if len(parts) > 2 and parts[-2][0].isupper() else None
+
+            entry = {
+                "test": test_name,
+                "file": test_file,
+                "line": report.location[1] + 1 if report.location else 0,
+            }
+            if test_class:
+                entry["test_class"] = test_class
+
+            if report.passed and report.when == "call":
+                entry["message"] = "passed"
+                self.passed.append(entry)
+            elif report.skipped:
+                entry["message"] = report.longreprtext if report.longreprtext else "skipped"
+                self.skipped.append(entry)
+            elif report.failed:
+                tb_str = str(report.longreprtext) if report.longreprtext else "unknown"
+                entry["traceback"] = tb_str
+                msg = tb_str.split("\n")[0] if "\n" in tb_str else tb_str
+                entry["message"] = msg
+                self.failed.append(entry)
+
+    collector = _ResultCollector()
+    exit_code = _pytest.main(pytest_args, plugins=[collector])
+    duration = _time.time() - start_time
+
+    passed = len(collector.passed)
+    failed = len(collector.failed)
+    skipped = len(collector.skipped)
+    total = passed + failed + skipped
+
+    result = {
+        "success": exit_code == 0,
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "skipped": skipped,
+        "duration": round(duration, 3),
+        "command": f"pytest {' '.join(pytest_args)}",
+        "failures": collector.failed,
+        "errors": [
+            format_test_failure(
+                failure["test"],
+                failure["file"],
+                failure["line"],
+                failure["message"],
+                traceback_str=failure.get("traceback"),
+                test_class=failure.get("test_class"),
+            )
+            for failure in collector.failed
+        ],
+        "affected": True,
+        "affected_tests": (affected or {}).get("affected_tests", []),
+        "changed_files": (affected or {}).get("changed_files", []),
+        "executed": True,
+    }
+
+    if as_json:
+        _print_json(result)
+        return 0 if result["success"] else 1
+
+    print(f"TEST_RESULT: {'PASS' if result['success'] else 'FAIL'}")
+    print(f"total: {total}  passed: {passed}  failed: {failed}  skipped: {skipped}")
+    print(f"duration: {duration:.3f}s")
+    for failure in collector.failed:
+        print()
+        print("TEST_FAILED")
+        print(f"error_type: TEST_FAILURE")
+        print(f"test: {failure['test']}")
+        print(f"file: {failure['file']}")
+        print(f"line: {failure['line']}")
+        print(f"message: {failure['message']}")
+    return 0 if result["success"] else 1
+
+
+def _cmd_test(args: argparse.Namespace) -> int:
+    """Run tests with pytest and produce LLM-friendly output.</
+
+    Delegates to ``pytest`` under the hood; never reimplements a test runner.
+
+    Sub-modes:
+
+    * ``bet test affected [paths...]``   detect git-changed files and run only
+      the tests likely impacted by them (uses Project Intelligence).
+    * ``bet test --affected --run``      run the affected subset (list only by
+      default).
+    """
+    as_json = _as_json(args)
+
+    paths = list(getattr(args, "test_paths", ["tests"]))
+
+    # ``bet test affected`` -- run only the tests affected by changed files.
+    # Default behavior: run them (not just list).  Use ``--list`` to list only.
+    if getattr(args, "affected", False) or (paths and paths[0] == "affected"):
+        list_only = getattr(args, "list", False)
+        return _run_affected_tests(args, paths[1:], list_only=list_only)
 
     # Build pytest arguments.
     pytest_args: list[str] = []
@@ -2076,7 +2577,6 @@ def _cmd_test(args: argparse.Namespace) -> int:
     provided_layers = [
         layer for layer in _TEST_LAYERS if getattr(args, layer, False)
     ]
-    paths = getattr(args, "test_paths", ["tests"])
 
     # Determine test paths/patterns.
     if paths != ["tests"]:
@@ -2160,12 +2660,16 @@ def _cmd_test(args: argparse.Namespace) -> int:
             parts = node_id.split("::")
             test_name = parts[-1]
             test_file = parts[0] if len(parts) > 1 else node_id
+            test_class = parts[-2] if len(parts) > 2 and parts[-2][0].isupper() else None
 
             entry = {
                 "test": test_name,
                 "file": test_file,
                 "line": report.location[1] + 1 if report.location else 0,
             }
+
+            if test_class:
+                entry["test_class"] = test_class
 
             if report.passed and report.when == "call":
                 entry["message"] = "passed"
@@ -2174,10 +2678,11 @@ def _cmd_test(args: argparse.Namespace) -> int:
                 entry["message"] = report.longreprtext if report.longreprtext else "skipped"
                 self.skipped.append(entry)
             elif report.failed:
-                # Extract short message.
-                msg = str(report.longreprtext) if report.longreprtext else "unknown"
-                # Truncate to first meaningful line.
-                msg = msg.split("\n")[0] if "\n" in msg else msg
+                # Extract full traceback for LLM consumption
+                tb_str = str(report.longreprtext) if report.longreprtext else "unknown"
+                entry["traceback"] = tb_str
+                # Extract short message (first meaningful line)
+                msg = tb_str.split("\n")[0] if "\n" in tb_str else tb_str
                 entry["message"] = msg
                 self.failed.append(entry)
 
@@ -2201,7 +2706,21 @@ def _cmd_test(args: argparse.Namespace) -> int:
         "failed": failed,
         "skipped": skipped,
         "duration": round(duration, 3),
+        "command": f"pytest {' '.join(pytest_args)}",
+        # ``failures`` keeps the legacy shape; ``errors`` carries the canonical
+        # StructuredError payload so an LLM reads ONE error contract everywhere.
         "failures": collector.failed,
+        "errors": [
+            format_test_failure(
+                failure["test"],
+                failure["file"],
+                failure["line"],
+                failure["message"],
+                traceback_str=failure.get("traceback"),
+                test_class=failure.get("test_class"),
+            )
+            for failure in collector.failed
+        ],
     }
 
     if as_json:
@@ -2215,6 +2734,7 @@ def _cmd_test(args: argparse.Namespace) -> int:
     for failure in collector.failed:
         print()
         print("TEST_FAILED")
+        print(f"error_type: TEST_FAILURE")
         print(f"test: {failure['test']}")
         print(f"file: {failure['file']}")
         print(f"line: {failure['line']}")
@@ -2231,19 +2751,37 @@ def _empty_test_result(reason: str) -> dict:
         "failed": 0,
         "skipped": 0,
         "duration": 0.0,
+        "command": "pytest",
         "failures": [],
+        "errors": [],
         "note": reason,
     }
 
 
 def _configure_test(parser: argparse.ArgumentParser) -> None:
     """Add ``test`` specific arguments (registered with the command)."""
-    # Optional paths (defaults to "tests" directory).
+    # Optional paths (defaults to "tests" directory).  ``bet test affected``
+    # arrives here as ``test_paths == ["affected"]``.
     parser.add_argument(
         "test_paths",
         nargs="*",
         default=["tests"],
-        help="test path(s) (file or directory, default: tests/)",
+        help='test path(s) (file or directory, default: tests/); or "affected"',
+    )
+    parser.add_argument(
+        "--affected",
+        action="store_true",
+        help="detect changed files (git) and run only affected tests",
+    )
+    parser.add_argument(
+        "--run",
+        action="store_true",
+        help="when using --affected, actually execute the tests (default list only)",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="with --affected, only list affected tests (default when no --run)",
     )
     # Layer filters (mutually exclusive-ish; last wins in argparse).
     for layer, help_text in _TEST_LAYERS.items():
@@ -2298,6 +2836,15 @@ def build_command_registry() -> CommandRegistry:
     registry.register(
         Command("discover", COMMAND_HELP["discover"], _cmd_discover, configure=_configure_discover)
     )
+    registry.register(
+        Command("inspect", COMMAND_HELP["inspect"], _cmd_inspect, configure=_configure_inspect)
+    )
+    registry.register(
+        Command("context", COMMAND_HELP["context"], _cmd_context, configure=_configure_context)
+    )
+    registry.register(
+        Command("impact", COMMAND_HELP["impact"], _cmd_impact, configure=_configure_impact)
+    )
     return registry
 
 
@@ -2332,24 +2879,48 @@ def build_parser(registry: Optional[CommandRegistry] = None) -> argparse.Argumen
 
 
 def main(argv: Optional[Sequence[str]] = None, registry: Optional[CommandRegistry] = None) -> int:
-    """CLI entry point. Returns a real exit code (0 = success)."""
+    """CLI entry point. Returns a real exit code (0 = success).
+
+    On failure, emits a structured error envelope (see
+    ``betrayer.core.error_contract.StructuredError``) in JSON when
+    ``--json`` is present, or a concise human message otherwise.
+    """
     parser = build_parser(registry)
     args = parser.parse_args(argv)
     command = getattr(args, "_command", None)
     if command is None:
         parser.print_help()
         return 2
+
+    cmd_name = getattr(args, "command", None) or command.name
+    cmd_args = list(argv) if argv is not None else list(sys.argv[1:])
+
     try:
         return int(command.handler(args))
     except CommandError as exc:
-        print(f"[FAIL] {exc}", file=sys.stderr)
-        return exc.exit_code
+        exit_code = exc.exit_code
+        if _as_json(args):
+            error = format_cli_error(exc, cmd_name, cmd_args, exit_code)
+            _print_json({"success": False, "error": error})
+        else:
+            print(f"[FAIL] {exc}", file=sys.stderr)
+        return exit_code
     except BetrayerError as exc:
-        print(f"[FAIL] {exc}", file=sys.stderr)
-        return 1
+        exit_code = 1
+        if _as_json(args):
+            error = format_cli_error(exc, cmd_name, cmd_args, exit_code)
+            _print_json({"success": False, "error": error})
+        else:
+            print(f"[FAIL] {exc}", file=sys.stderr)
+        return exit_code
     except Exception as exc:  # noqa: BLE001 - never leak a traceback as the only output
-        print(f"[FAIL] unexpected error: {type(exc).__name__}: {exc}", file=sys.stderr)
-        return 1
+        exit_code = 1
+        if _as_json(args):
+            error = format_cli_error(exc, cmd_name, cmd_args, exit_code)
+            _print_json({"success": False, "error": error})
+        else:
+            print(f"[FAIL] unexpected error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return exit_code
 
 
 if __name__ == "__main__":  # pragma: no cover - module entry point

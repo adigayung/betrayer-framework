@@ -27,6 +27,12 @@ from betrayer.core.exceptions import (
     RegistryError,
 )
 from betrayer.core.exceptions import RuntimeError as BetrayerRuntimeError
+from betrayer.core.error_contract import (
+    StructuredError,
+    format_error_for_llm,
+    format_cli_error,
+    format_test_failure,
+)
 from betrayer.core.container import LIFETIMES, SINGLETON, TRANSIENT, Container
 from betrayer.core.events import Event, EventBus, EventHandler
 from betrayer.core.extension import Extension, ExtensionRegistry, ExtensionState

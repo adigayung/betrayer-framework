@@ -40,6 +40,80 @@
                 "runtime",
                 "diagnostics"
             ]
+        },
+        {
+            "name": "data",
+            "description": "Database contract, ORM, query builder, repository, migrations, cache",
+            "dependencies": [
+                "core",
+                "runtime"
+            ]
+        },
+        {
+            "name": "web",
+            "description": "Web/REST runtime: adapter, routing, request/response, resource, validation, realtime",
+            "dependencies": [
+                "core",
+                "runtime",
+                "diagnostics"
+            ]
+        },
+        {
+            "name": "auth",
+            "description": "Authentication and authorization (identity resolution, access control)",
+            "dependencies": [
+                "core",
+                "web"
+            ]
+        },
+        {
+            "name": "ratelimit",
+            "description": "Fixed-window rate limiting for the request pipeline",
+            "dependencies": [
+                "core",
+                "web"
+            ]
+        },
+        {
+            "name": "cache",
+            "description": "Backend-agnostic cache with TTL and web middleware",
+            "dependencies": [
+                "core",
+                "data",
+                "web"
+            ]
+        },
+        {
+            "name": "jobs",
+            "description": "Background job system: queue, job runner, scheduler",
+            "dependencies": [
+                "core",
+                "runtime"
+            ]
+        },
+        {
+            "name": "infrastructure",
+            "description": "Infrastructure services: queue, scheduler, retry, email, health",
+            "dependencies": [
+                "core",
+                "runtime"
+            ]
+        },
+        {
+            "name": "generators",
+            "description": "Code generators: project, module, resource, service, CRUD, migration, extension",
+            "dependencies": [
+                "core",
+                "runtime"
+            ]
+        },
+        {
+            "name": "architecture",
+            "description": "Architecture Guard: canonical architecture rule enforcement",
+            "dependencies": [
+                "core",
+                "runtime"
+            ]
         }
     ],
     "dependency_rules": [
@@ -47,7 +121,16 @@
         "runtime MUST NOT depend on cli or diagnostics",
         "diagnostics MUST NOT depend on cli",
         "cli MUST depend only on core, runtime, and diagnostics",
-        "ai MUST depend only on core, runtime, and diagnostics"
+        "ai MUST depend only on core, runtime, and diagnostics",
+        "data MUST depend only on core and runtime",
+        "web MUST depend only on core, runtime, and diagnostics",
+        "auth MUST depend only on core and web",
+        "ratelimit MUST depend only on core and web",
+        "cache MUST depend only on core, data, and web",
+        "jobs MUST depend only on core and runtime",
+        "infrastructure MUST depend only on core and runtime",
+        "generators MUST depend only on core and runtime",
+        "architecture MUST depend only on core and runtime"
     ],
     "extension_points": [
         "lifecycle handlers (on_bootstrap, on_initialize, on_ready, on_start, on_stop, on_shutdown, on_error)",

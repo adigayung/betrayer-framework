@@ -26,9 +26,12 @@ tools, validation, and runtime hands for coding agents.
 - **main**: Command-line interface using argparse.
   Delegates to framework public APIs only.
 
-### AI Documentation
-- **ai/**: LLM-facing documentation in markdown. Documentation only — it is
-  NOT an importable package and contains no code.
+### AI Surface
+- **ai/**: LLM-facing documentation in markdown (contracts, patterns, this map)
+  **and** the capability discovery package — `betrayer.ai.capabilities` (the
+  canonical capability registry) and `betrayer.ai.discover` (the LLM entry point
+  `list` / `get` / `search` / `summary`). `betrayer/ai` is importable and depends
+  only on the standard library.
 
 ## Dependency Rules
 

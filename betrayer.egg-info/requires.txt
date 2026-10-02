@@ -1,0 +1,14 @@
+
+[dev]
+pytest
+
+[duckdb]
+duckdb
+
+[http]
+requests
+
+[web]
+flask
+flask-sock
+werkzeug

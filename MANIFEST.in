@@ -1,0 +1,8 @@
+# Ship only the runtime package and its metadata.
+# Keep development-only material out of the sdist.
+prune tests
+prune .betrayer
+prune .aether
+prune build
+prune dist
+global-exclude *.py[cod] __pycache__/*

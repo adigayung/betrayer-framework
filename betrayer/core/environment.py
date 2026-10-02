@@ -20,7 +20,7 @@ from typing import Any, Optional
 PROJECT_MARKERS = ("pyproject.toml", "setup.py", ".betrayer", ".git")
 DEFAULT_MODE = "development"
 MODE_ENV_KEYS = ("BETRAYER_MODE", "BETRAYER_ENV")
-CHECKED_DEPENDENCIES = ("betrayer-framework", "pytest", "setuptools")
+CHECKED_DEPENDENCIES = ("betrayer", "pytest", "setuptools")
 
 
 def detect_project_root(start: Path) -> Path:

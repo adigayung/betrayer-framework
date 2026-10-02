@@ -1,0 +1,2 @@
+[console_scripts]
+bet = betrayer.cli.main:main

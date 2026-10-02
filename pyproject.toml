@@ -1,16 +1,26 @@
 [build-system]
 requires = ["setuptools>=68.0"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
-name = "betrayer-framework"
+name = "betrayer"
 version = "0.1.0"
 description = "LLM-first Python framework for coding agents"
+readme = "README.md"
 requires-python = ">=3.10"
+# No mandatory third-party runtime dependencies: the core, CLI and the
+# capability discovery surface run on the standard library alone.  Feature
+# specific dependencies are declared as optional extras below.
+dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest"]
+web = ["flask", "flask-sock", "werkzeug"]
+http = ["requests"]
 duckdb = ["duckdb"]
+
+[project.scripts]
+bet = "betrayer.cli.main:main"
 
 [tool.setuptools.packages.find]
 include = ["betrayer*"]

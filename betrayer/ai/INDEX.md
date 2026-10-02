@@ -81,7 +81,7 @@ betrayer/
   cli/
     __init__.py
     main.py            # CLI commands
-  ai/                  # LLM-facing documentation
+  ai/                  # LLM-facing documentation + capability discovery
   data/                # Database abstraction + ORM (betrayer.data)
     engines/           # Concrete engines: SQLiteEngine, DuckDBEngine (09.4)
   infrastructure/      # HTTP, queue, scheduler, retry, email, health
@@ -90,6 +90,10 @@ betrayer/
                        # + validation pipeline (Schema, Field, ValidationResult)
                        # + realtime/WebSocket (web.realtime: Channel, Connection,
                        #   Message, RealtimeManager, FlaskRealtimeAdapter)
+  auth/                # Authentication + authorization (identity, middleware)
+  cache/               # Backend-agnostic cache + web middleware
+  ratelimit/           # Fixed-window rate limiting + middleware
+  architecture/        # Architecture Guard (bet validate architecture section)
   generators/          # bet make ... code generators
 ```
 

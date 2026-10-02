@@ -227,7 +227,7 @@ name = "{self.package}"
 version = "{GENERATED_VERSION}"
 description = "{self.display_name} - a Betrayer application"
 requires-python = ">=3.10"
-dependencies = ["betrayer-framework"]
+dependencies = ["betrayer"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
@@ -261,9 +261,9 @@ The application depends on the {FRAMEWORK_NAME} framework.  Install it first
 (Python >= 3.10):
 
 ```bash
-pip install -e /path/to/betrayer-framework
+pip install -e /path/to/betrayer
 # or
-pip install "betrayer-framework"
+pip install "betrayer"
 ```
 
 ## Run

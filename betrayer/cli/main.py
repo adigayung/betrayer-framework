@@ -48,6 +48,7 @@ from betrayer.diagnostics.store import (
     DiagnosticsStore,
 )
 from betrayer.ai import intelligence
+from betrayer.ai import indexer
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[2]
 MANIFEST_PATH: Path = PROJECT_ROOT / ".betrayer" / "manifest.json"
@@ -2160,7 +2161,10 @@ def _cmd_inspect(args: argparse.Namespace) -> int:
     project is produced (capabilities, commands, packages, files).
     """
     as_json = _as_json(args)
-    data = intelligence.inspect(args.target)
+    # The query refreshes the shared index itself so its index_info reports
+    # the actual operation (created/rebuilt/incremental/reused), rather than
+    # hiding it behind a second refresh.
+    data = indexer.inspect(args.target)
     if as_json:
         _print_json(data)
         return 0
@@ -2193,7 +2197,7 @@ def _cmd_context(args: argparse.Namespace) -> int:
     related tests so an LLM can understand scope without extra exploration.
     """
     as_json = _as_json(args)
-    data = intelligence.context(args.target)
+    data = indexer.context(args.target)
     if as_json:
         _print_json(data)
         return 0
@@ -2213,7 +2217,7 @@ def _cmd_context(args: argparse.Namespace) -> int:
 def _cmd_impact(args: argparse.Namespace) -> int:
     """Show which project parts may be affected by changing a target."""
     as_json = _as_json(args)
-    data = intelligence.impact(args.target)
+    data = indexer.impact(args.target)
     if as_json:
         _print_json(data)
         return 0
@@ -2221,8 +2225,8 @@ def _cmd_impact(args: argparse.Namespace) -> int:
     print()
     print(f"Source files ({len(data['source_files'])}): {', '.join(data['source_files']) or 'none'}")
     print(f"Dependencies ({len(data['dependencies'])}): {', '.join(data['dependencies']) or 'none'}")
-    print(f"Potentially affected ({len(data['potentially_affected'])}):")
-    for p in data["potentially_affected"]:
+    print(f"Potentially affected ({len(data['affected'])}):")
+    for p in data["affected"]:
         print(f"  {p}")
     return 0
 
@@ -2395,7 +2399,8 @@ def _run_affected_tests(args: argparse.Namespace, extra: list[str], list_only: b
     as_json = _as_json(args)
 
     # Map changed files (auto-detected from ``git``) to candidate tests.
-    info = intelligence.affected_tests(changed=None)
+    # Uses the shared persistent index for faster response.
+    info = indexer.affected_tests(changed=None)
 
     if not info["affected_tests"]:
         payload = dict(info)
